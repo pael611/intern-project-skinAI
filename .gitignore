@@ -14,12 +14,29 @@ pnpm-debug.log*
 !.vscode/settings.json
 !.vscode/extensions.json
 
-# Env & local secrets
-.env
-.env.local
-.env.*.local
-
 # OS junk
 Thumbs.db
 .DS_Store
 node_modules
+
+# Environment files (do NOT commit secrets)
+.env
+.env.local
+.env.*
+.env.*.local
+
+# Build / output
+dist/
+build/
+
+# IDEs
+.idea/
+
+# Private keys and certificates
+*.pem
+*.key
+
+# Deployment / platform configs
+.vercel
+.netlify
+.firebase
