@@ -39,8 +39,8 @@ export async function GET() {
       .limit(1)
     if (!qErr) canQuery = true
     else queryErrMsg = qErr.message
-  } catch (e: any) {
-    queryErrMsg = e?.message ?? String(e)
+  } catch (e: unknown) {
+    queryErrMsg = e instanceof Error ? e.message : String(e)
   }
 
   return NextResponse.json({

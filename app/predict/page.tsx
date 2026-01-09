@@ -29,6 +29,20 @@ type TreatmentRow = {
   Tags: string
 }
 
+type OrtTensor = unknown
+
+type OrtSession = {
+  inputNames?: string[]
+  inputMetadata: Record<string, unknown>
+  outputNames?: string[]
+  run: (feeds: Record<string, unknown>) => Promise<Record<string, { data: Float32Array }>>
+}
+
+type OrtNamespace = {
+  Tensor: new (type: string, data: Float32Array, dims: number[]) => OrtTensor
+  InferenceSession: { create: (modelUrl: string) => Promise<OrtSession> }
+}
+
 const MODEL_URL = "/model/best_skin_model.onnx"
 const INPUT_SIZE = 224
 const categories = [
@@ -50,9 +64,9 @@ export default function PredictPage() {
   const imageRef = useRef<HTMLImageElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const imageTensorRef = useRef<any>(null)
-  const ortRef = useRef<any>(null)
-  const sessionRef = useRef<any>(null)
+  const imageTensorRef = useRef<OrtTensor | null>(null)
+  const ortRef = useRef<OrtNamespace | null>(null)
+  const sessionRef = useRef<OrtSession | null>(null)
   const camStreamRef = useRef<MediaStream | null>(null)
 
   // Load treatments
@@ -65,13 +79,13 @@ export default function PredictPage() {
 
   // Load ORT from CDN to avoid bundler ESM issues
   function loadOrtFromCdn() {
-    return new Promise<any>((resolve, reject) => {
+    return new Promise<OrtNamespace>((resolve, reject) => {
       if (typeof window === "undefined") return reject(new Error("Not in browser"))
-      const anyWin = window as any
-      if (anyWin.ort) return resolve(anyWin.ort)
+      const win = window as unknown as { ort?: OrtNamespace }
+      if (win.ort) return resolve(win.ort)
       const existing = document.getElementById("ort-cdn-script") as HTMLScriptElement | null
       if (existing) {
-        existing.addEventListener("load", () => resolve((window as any).ort))
+        existing.addEventListener("load", () => resolve((window as unknown as { ort?: OrtNamespace }).ort!))
         existing.addEventListener("error", () => reject(new Error("Failed to load ORT CDN script")))
         return
       }
@@ -80,7 +94,7 @@ export default function PredictPage() {
       script.src = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"
       script.async = true
       script.crossOrigin = "anonymous"
-      script.onload = () => resolve((window as any).ort)
+      script.onload = () => resolve((window as unknown as { ort?: OrtNamespace }).ort!)
       script.onerror = () => reject(new Error("Failed to load ORT CDN script"))
       document.head.appendChild(script)
     })
@@ -107,8 +121,9 @@ export default function PredictPage() {
         try { await sessionRef.current.run({ [inputName]: dummy }) } catch {}
         setSessionReady(true)
         setLoadingMsg("Model loaded. Upload an image or use camera.")
-      } catch (e: any) {
-        setLoadingMsg(`Failed to load model: ${e?.message ?? e}`)
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e)
+        setLoadingMsg(`Failed to load model: ${message}`)
       }
     })()
   }, [])
@@ -129,6 +144,11 @@ export default function PredictPage() {
   }
 
   function preprocessImage(img: HTMLImageElement, size = INPUT_SIZE) {
+    const ort = ortRef.current
+    if (!ort) {
+      throw new Error("ONNX runtime not loaded")
+    }
+
     const canvas = document.createElement("canvas")
     canvas.width = size
     canvas.height = size
@@ -162,11 +182,12 @@ export default function PredictPage() {
       arr[i * 3 + 2] = data[i * 4 + 2] / 127.5 - 1
     }
     // Return NHWC tensor [1, size, size, 3]
-    return new ortRef.current.Tensor("float32", arr, [1, size, size, 3])
+    return new ort.Tensor("float32", arr, [1, size, size, 3])
   }
 
   async function runPredict() {
-    if (!sessionRef.current) {
+    const session = sessionRef.current
+    if (!session) {
       setResult("Model not loaded")
       return
     }
@@ -180,12 +201,12 @@ export default function PredictPage() {
     img.onload = async () => {
       imageTensorRef.current = preprocessImage(img)
       try {
-        const feeds: Record<string, any> = {}
-        const inputName = sessionRef.current.inputNames?.[0] ?? Object.keys(sessionRef.current.inputMetadata)[0]
+        const feeds: Record<string, unknown> = {}
+        const inputName = session.inputNames?.[0] ?? Object.keys(session.inputMetadata)[0]
         feeds[inputName] = imageTensorRef.current
         setResult("Running inference…")
-        const output = await sessionRef.current.run(feeds)
-        const outName = sessionRef.current.outputNames?.[0] ?? Object.keys(output)[0]
+        const output = await session.run(feeds)
+        const outName = session.outputNames?.[0] ?? Object.keys(output)[0]
         const scores: Float32Array = output[outName].data
         let bestIdx = 0
         for (let i = 1; i < scores.length; i++) if (scores[i] > scores[bestIdx]) bestIdx = i
@@ -198,8 +219,9 @@ export default function PredictPage() {
 
         // Save to history (anonymous or with user if signed-in)
         await savePrediction({ label, confidence: Number((bestScore).toFixed(6)), source: camStreamRef.current ? "camera" : "upload", occurred_at: new Date().toISOString() })
-      } catch (e: any) {
-        setResult(`Inference failed: ${e?.message ?? e}`)
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e)
+        setResult(`Inference failed: ${message}`)
       }
     }
     img.src = imgEl.src
@@ -291,9 +313,10 @@ export default function PredictPage() {
       videoRef.current.style.display = "block"
       await videoRef.current.play().catch(() => {})
       setResult("")
-    } catch (e: any) {
-      const name = e?.name || "Error"
-      const msg = e?.message || String(e)
+    } catch (e: unknown) {
+      const err = e as { name?: unknown; message?: unknown }
+      const name = typeof err?.name === 'string' ? err.name : 'Error'
+      const msg = typeof err?.message === 'string' ? err.message : String(e)
       let hint = ""
       if (name === "NotAllowedError") {
         hint = "Izin kamera ditolak. Buka pengaturan site pada browser dan izinkan kamera."
@@ -312,7 +335,7 @@ export default function PredictPage() {
       camStreamRef.current = null
     }
     if (videoRef.current) {
-      ;(videoRef.current as any).srcObject = null
+      videoRef.current.srcObject = null
       videoRef.current.style.display = "none"
     }
   }
@@ -356,6 +379,7 @@ export default function PredictPage() {
         </div>
         <canvas ref={canvasRef} width={INPUT_SIZE} height={INPUT_SIZE} className="hidden" />
         <div className="flex justify-center">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img ref={imageRef} id="preview" src="#" alt="Preview" className="hidden max-w-[224px] rounded border border-neutral-200" />
         </div>
         <div className="flex justify-center">

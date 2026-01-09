@@ -42,7 +42,15 @@ export async function POST(req: NextRequest) {
       console.error('Supabase getUser error:', userErr.message)
     }
 
-    const payload: Record<string, any> = {
+    type PredictionInsertPayload = {
+      label: string
+      confidence: number
+      source: 'upload' | 'camera'
+      occurred_at: string
+      user_id?: string
+    }
+
+    const payload: PredictionInsertPayload = {
       label,
       confidence,
       source,
@@ -78,8 +86,8 @@ export async function POST(req: NextRequest) {
       }, { status: 500 })
     }
     return NextResponse.json({ ok: true, data: Array.isArray(data) ? data[0] : data })
-  } catch (e: any) {
-    const msg = e?.message ?? String(e)
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
     const looksLikeHtml = typeof msg === 'string' && msg.includes('<html')
     console.error('Predictions route exception:', msg)
     return NextResponse.json({

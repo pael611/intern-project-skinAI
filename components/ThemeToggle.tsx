@@ -17,7 +17,7 @@ export default function ThemeToggle() {
       setIsDark(dark);
       document.documentElement.classList.toggle("dark", dark);
       document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
-      try { (document.documentElement as any).style.colorScheme = dark ? "dark" : "light"; } catch {}
+      try { document.documentElement.style.colorScheme = dark ? "dark" : "light"; } catch {}
       localStorage.setItem("theme", dark ? "dark" : "light");
     } catch (_) {}
   }, []);
@@ -30,7 +30,7 @@ export default function ThemeToggle() {
     } catch (_) {}
     document.documentElement.classList.toggle("dark", next);
     document.documentElement.setAttribute("data-theme", next ? "dark" : "light");
-    try { (document.documentElement as any).style.colorScheme = next ? "dark" : "light"; } catch {}
+    try { document.documentElement.style.colorScheme = next ? "dark" : "light"; } catch {}
     // Fire a custom event for debugging or listeners
     try { window.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next ? "dark" : "light" } })); } catch {}
   }

@@ -12,6 +12,8 @@ export async function middleware(req: NextRequest) {
   const isProtected = protectedPaths.some((p) => pathname.startsWith(p))
   if (!isProtected) return res
 
+  type CookieSetOptions = Omit<Parameters<typeof res.cookies.set>[0], 'name' | 'value'>
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY!,
@@ -20,10 +22,10 @@ export async function middleware(req: NextRequest) {
         get(name: string) {
           return req.cookies.get(name)?.value
         },
-        set(name: string, value: string, options: any) {
+        set(name: string, value: string, options: CookieSetOptions) {
           res.cookies.set({ name, value, ...options })
         },
-        remove(name: string, options: any) {
+        remove(name: string, options: CookieSetOptions) {
           res.cookies.set({ name, value: '', ...options })
         },
       },
