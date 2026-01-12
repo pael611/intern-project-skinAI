@@ -1,6 +1,8 @@
 "use client"
 import { useEffect, useRef, useState } from "react"
-import NextImage from "next/image"
+import Image from "next/image"
+import { useFaceDetection } from "@/hooks/useFaceDetection"
+
 // Helper: save prediction history via API
 async function savePrediction(payload: { label: string; confidence: number; source: "upload" | "camera"; occurred_at?: string }) {
   try {
@@ -44,7 +46,8 @@ type OrtNamespace = {
 }
 
 const MODEL_URL = "/model/best_skin_model.onnx"
-const INPUT_SIZE = 224
+// Match TF2ONNX export input signature: (None, 320, 320, 3)
+const INPUT_SIZE = 320
 const categories = [
   "Acne",
   "Blackheads",
@@ -60,14 +63,30 @@ export default function PredictPage() {
   const [treatments, setTreatments] = useState<TreatmentRow[]>([])
   const [resultHtml, setResultHtml] = useState<string>("")
   const [predictedTag, setPredictedTag] = useState<string | null>(null)
+  const [faceDetected, setFaceDetected] = useState<boolean | null>(null)
+  const [cameraActive, setCameraActive] = useState(false)
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null)
 
-  const imageRef = useRef<HTMLImageElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const imageTensorRef = useRef<OrtTensor | null>(null)
   const ortRef = useRef<OrtNamespace | null>(null)
   const sessionRef = useRef<OrtSession | null>(null)
   const camStreamRef = useRef<MediaStream | null>(null)
+
+  // Face detection hook
+  const {
+    status: faceStatus,
+    faceBox,
+    faceCount,
+    error: faceError,
+    detectFromVideo,
+    detectFromImage,
+    drawFaceBox,
+    startContinuousDetection,
+    stopContinuousDetection,
+  } = useFaceDetection()
 
   // Load treatments
   useEffect(() => {
@@ -76,6 +95,35 @@ export default function PredictPage() {
       .then((data) => setTreatments(data))
       .catch(() => {})
   }, [])
+
+  // Draw face detection overlay on video
+  useEffect(() => {
+    if (!cameraActive || !overlayCanvasRef.current || !videoRef.current) return
+
+    const video = videoRef.current
+    const canvas = overlayCanvasRef.current
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
+
+    const draw = () => {
+      if (!cameraActive) return
+      
+      canvas.width = video.videoWidth || 640
+      canvas.height = video.videoHeight || 480
+
+      // Clear canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+      // Draw face bounding box if detected
+      if (faceBox) {
+        drawFaceBox(ctx, canvas.width, canvas.height, "#22c55e")
+      }
+
+      requestAnimationFrame(draw)
+    }
+
+    draw()
+  }, [cameraActive, faceBox, drawFaceBox])
 
   // Load ORT from CDN to avoid bundler ESM issues
   function loadOrtFromCdn() {
@@ -134,11 +182,39 @@ export default function PredictPage() {
 
   async function onFileChange(ev: React.ChangeEvent<HTMLInputElement>) {
     const file = ev.target.files?.[0]
-    if (!file || !imageRef.current) return
+    if (!file) return
+    
+    // Reset face detection state
+    setFaceDetected(null)
+    setPredictedTag(null)
+    setResultHtml("")
+    
     const reader = new FileReader()
-    reader.onload = () => {
-      imageRef.current!.src = reader.result as string
-      imageRef.current!.style.display = "block"
+    reader.onload = async () => {
+      const src = reader.result as string
+      setPreviewSrc(src)
+
+      // Detect face using an off-DOM Image element (works with next/image)
+      const probe = new window.Image()
+      probe.crossOrigin = "anonymous"
+      probe.onload = async () => {
+        setResult('<div class="text-blue-600 animate-pulse">🔍 Mendeteksi wajah...</div>')
+        try {
+          const hasFace = await detectFromImage(probe)
+          setFaceDetected(hasFace)
+
+          if (hasFace) {
+            setResult('<div class="text-emerald-600">✅ Wajah terdeteksi! Silakan klik Prediksi.</div>')
+          } else {
+            setResult('<div class="text-amber-600">⚠️ Tidak ada wajah terdeteksi. Pastikan gambar berisi wajah yang jelas.</div>')
+          }
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e)
+          setFaceDetected(false)
+          setResult(`<div class="text-amber-600">⚠️ Gagal mendeteksi wajah: ${msg}</div>`)
+        }
+      }
+      probe.src = src
     }
     reader.readAsDataURL(file)
   }
@@ -191,8 +267,7 @@ export default function PredictPage() {
       setResult("Model not loaded")
       return
     }
-    const imgEl = imageRef.current
-    if (!imgEl || !imgEl.src || imgEl.src === "#") {
+    if (!previewSrc) {
       setResult("Please upload an image first.")
       return
     }
@@ -224,32 +299,122 @@ export default function PredictPage() {
         setResult(`Inference failed: ${message}`)
       }
     }
-    img.src = imgEl.src
+    img.src = previewSrc
   }
 
   function Recommendations({ tag }: { tag: string }) {
+    const imageCacheRef = useRef(new Map<string, string | null>())
     const produk = treatments.filter((row) => row.Tags?.toLowerCase() === tag.toLowerCase())
     if (produk.length === 0) {
       return <div className="mt-4 rounded border border-amber-200 bg-amber-50 p-3 text-amber-800 dark:border-amber-400/30 dark:bg-neutral-900 dark:text-amber-300">Tidak ada rekomendasi produk untuk kategori ini.</div>
     }
+
+    function ProductImage({ productId }: { productId: string }) {
+      const [src, setSrc] = useState<string | null>(() => imageCacheRef.current.get(productId) ?? null)
+      const [missing, setMissing] = useState<boolean>(() => imageCacheRef.current.get(productId) === null)
+
+      useEffect(() => {
+        let cancelled = false
+        const cached = imageCacheRef.current.get(productId)
+        if (cached !== undefined) {
+          setSrc(cached)
+          setMissing(cached === null)
+          return
+        }
+
+        async function resolve() {
+          if (!productId) {
+            imageCacheRef.current.set(productId, null)
+            if (!cancelled) {
+              setSrc(null)
+              setMissing(true)
+            }
+            return
+          }
+
+          const exts = ["png", "jpg"]
+          for (const ext of exts) {
+            const url = `/skincare_product/gambar_produk/${productId}.${ext}`
+            try {
+              const head = await fetch(url, { method: "HEAD", cache: "force-cache" })
+              if (head.ok) {
+                imageCacheRef.current.set(productId, url)
+                if (!cancelled) {
+                  setSrc(url)
+                  setMissing(false)
+                }
+                return
+              }
+
+              // Some static hosts may not support HEAD; fallback to GET.
+              if (head.status === 405 || head.status === 501) {
+                const get = await fetch(url, { method: "GET", cache: "force-cache" })
+                if (get.ok) {
+                  imageCacheRef.current.set(productId, url)
+                  if (!cancelled) {
+                    setSrc(url)
+                    setMissing(false)
+                  }
+                  return
+                }
+              }
+            } catch {
+              // ignore and try next extension
+            }
+          }
+
+          imageCacheRef.current.set(productId, null)
+          if (!cancelled) {
+            setSrc(null)
+            setMissing(true)
+          }
+        }
+
+        void resolve()
+        return () => {
+          cancelled = true
+        }
+      }, [productId])
+
+      if (missing) {
+        return (
+          <div className="flex h-24 w-24 items-center justify-center rounded-xl bg-neutral-50 text-center text-[10px] leading-tight text-neutral-500 ring-1 ring-emerald-100 group-hover:ring-emerald-200 dark:bg-neutral-900 dark:text-neutral-400 dark:ring-emerald-700/50">
+            Gambar tidak tersedia
+          </div>
+        )
+      }
+
+      if (!src) {
+        return <div className="h-24 w-24 animate-pulse rounded-xl bg-neutral-100 ring-1 ring-emerald-100 dark:bg-neutral-800 dark:ring-emerald-700/50" />
+      }
+
+      return (
+        <Image
+          src={src}
+          alt="produk"
+          width={96}
+          height={96}
+          sizes="96px"
+          className="h-24 w-24 rounded-xl object-cover ring-1 ring-emerald-100 group-hover:ring-emerald-200 dark:ring-emerald-700/50"
+          onError={() => {
+            imageCacheRef.current.set(productId, null)
+            setMissing(true)
+          }}
+        />
+      )
+    }
+
     return (
       <div className="mt-8">
         <h4 className="mb-4 text-xl font-extrabold tracking-tight text-emerald-900">Rekomendasi Produk</h4>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {produk.map((row) => {
-            const imgPath = findProductImage(row.Id)
             return (
               <div
-                key={row.Id}
+                key={row.Id || row["Product Name"]}
                 className="group flex items-center gap-4 rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm transition hover:shadow-md dark:border-emerald-800/40 dark:bg-emerald-900/20"
               >
-                <NextImage
-                  src={imgPath}
-                  alt="produk"
-                  width={96}
-                  height={96}
-                  className="h-24 w-24 rounded-xl object-cover ring-1 ring-emerald-100 group-hover:ring-emerald-200 dark:ring-emerald-700/50"
-                />
+                <ProductImage productId={row.Id} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm text-neutral-500">{row.Brand}</div>
                   <div className="truncate text-lg font-semibold text-neutral-900">{row["Product Name"]}</div>
@@ -278,16 +443,6 @@ export default function PredictPage() {
     )
   }
 
-  function findProductImage(id: string) {
-    const exts = ["png", "jpg", "webp"]
-    for (const ext of exts) {
-      const path = `/skincare_product/gambar_produk/${id}.${ext}`
-      // We optimistically return the first candidate; onerror hides if missing
-      return path
-    }
-    return "/skincare_product/gambar_produk/default.png"
-  }
-
   async function startCamera() {
     if (!videoRef.current) return
     // Feature detection and secure context requirement
@@ -312,7 +467,15 @@ export default function PredictPage() {
       videoRef.current.setAttribute("playsinline", "true")
       videoRef.current.style.display = "block"
       await videoRef.current.play().catch(() => {})
-      setResult("")
+      setCameraActive(true)
+      setFaceDetected(null)
+      setPredictedTag(null)
+      setResult('<div class="text-blue-600 animate-pulse">🔍 Memulai deteksi wajah...</div>')
+      
+      // Start continuous face detection
+      startContinuousDetection(videoRef.current, (hasFace: boolean) => {
+        setFaceDetected(hasFace)
+      })
     } catch (e: unknown) {
       const err = e as { name?: unknown; message?: unknown }
       const name = typeof err?.name === 'string' ? err.name : 'Error'
@@ -330,6 +493,10 @@ export default function PredictPage() {
   }
 
   function stopCamera() {
+    // Stop face detection
+    stopContinuousDetection()
+    setCameraActive(false)
+    
     if (camStreamRef.current) {
       camStreamRef.current.getTracks().forEach((t) => t.stop())
       camStreamRef.current = null
@@ -338,10 +505,19 @@ export default function PredictPage() {
       videoRef.current.srcObject = null
       videoRef.current.style.display = "none"
     }
+    setFaceDetected(null)
+    setResult("")
   }
 
-  function captureFrame() {
-    if (!videoRef.current || !canvasRef.current || !imageRef.current) return
+  async function captureFrame() {
+    if (!videoRef.current || !canvasRef.current) return
+    
+    // Check if face is detected before capturing
+    if (!faceDetected) {
+      setResult('<div class="text-amber-600">⚠️ Tidak ada wajah terdeteksi. Posisikan wajah Anda di depan kamera.</div>')
+      return
+    }
+    
     const vw = videoRef.current.videoWidth
     const vh = videoRef.current.videoHeight
     const ar = vw / vh
@@ -360,8 +536,12 @@ export default function PredictPage() {
     ctx.clearRect(0, 0, INPUT_SIZE, INPUT_SIZE)
     ctx.drawImage(videoRef.current, sx, sy, sw, sh, 0, 0, INPUT_SIZE, INPUT_SIZE)
     const dataUrl = canvasRef.current.toDataURL("image/png")
-    imageRef.current.src = dataUrl
-    imageRef.current.style.display = "block"
+    setPreviewSrc(dataUrl)
+    
+    // Stop camera after capture
+    stopCamera()
+    
+    setResult('<div class="text-emerald-600">✅ Foto berhasil diambil! Silakan klik Prediksi.</div>')
   }
 
   return (
@@ -371,16 +551,86 @@ export default function PredictPage() {
         <input type="file" accept="image/*" className="w-full rounded border border-neutral-300 px-3 py-2 focus:border-emerald-600 focus:outline-none" onChange={onFileChange} />
         <div className="flex flex-wrap items-center justify-center gap-3">
           <button className="w-full rounded border border-neutral-300 px-4 py-2 text-neutral-700 hover:bg-neutral-100 sm:w-auto" onClick={startCamera}>Buka Kamera</button>
-          <button className="w-full rounded border border-emerald-600 px-4 py-2 text-emerald-700 hover:bg-emerald-50 sm:w-auto" onClick={captureFrame}>Ambil Foto</button>
+          <button 
+            className={`w-full rounded border px-4 py-2 sm:w-auto ${
+              faceDetected 
+                ? "border-emerald-600 text-emerald-700 hover:bg-emerald-50" 
+                : "border-neutral-300 text-neutral-400 cursor-not-allowed"
+            }`} 
+            onClick={captureFrame}
+            disabled={!faceDetected}
+          >
+            Ambil Foto
+          </button>
           <button className="w-full rounded border border-red-600 px-4 py-2 text-red-700 hover:bg-red-50 sm:w-auto" onClick={stopCamera}>Matikan Kamera</button>
         </div>
-        <div className="flex justify-center">
-          <video ref={videoRef} autoPlay playsInline className="hidden max-w-[224px] rounded" />
+        
+        {/* Face Detection Status Indicator */}
+        {cameraActive && (
+          <div className={`mx-auto max-w-md rounded-lg border p-3 text-center text-sm ${
+            faceDetected === null 
+              ? "border-blue-200 bg-blue-50 text-blue-700"
+              : faceDetected 
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700" 
+                : "border-amber-200 bg-amber-50 text-amber-700"
+          }`}>
+            <div className="flex items-center justify-center gap-2">
+              {faceDetected === null ? (
+                <>
+                  <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+                  <span>Memuat face detection...</span>
+                </>
+              ) : faceDetected ? (
+                <>
+                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none">
+                    <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/>
+                  </svg>
+                  <span>Wajah terdeteksi ({faceCount} wajah) - Siap mengambil foto!</span>
+                </>
+              ) : (
+                <>
+                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/>
+                    <path d="M15 9l-6 6M9 9l6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                  </svg>
+                  <span>Tidak ada wajah - Posisikan wajah di depan kamera</span>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Video Container with Overlay */}
+        <div className="relative flex justify-center">
+          <video 
+            ref={videoRef} 
+            autoPlay 
+            playsInline 
+            className={`hidden max-w-[320px] rounded ${cameraActive ? "!block" : ""}`}
+            style={{ transform: "scaleX(-1)" }}
+          />
+          <canvas 
+            ref={overlayCanvasRef} 
+            className={`pointer-events-none absolute left-1/2 top-0 -translate-x-1/2 ${cameraActive ? "block" : "hidden"}`}
+            style={{ maxWidth: "320px", transform: "scaleX(-1)" }}
+          />
         </div>
+        
         <canvas ref={canvasRef} width={INPUT_SIZE} height={INPUT_SIZE} className="hidden" />
         <div className="flex justify-center">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img ref={imageRef} id="preview" src="#" alt="Preview" className="hidden max-w-[224px] rounded border border-neutral-200" />
+          {previewSrc ? (
+            <Image
+              id="preview"
+              src={previewSrc}
+              alt="Preview"
+              width={320}
+              height={320}
+              unoptimized
+              className="max-w-[320px] rounded border border-neutral-200"
+              style={{ height: "auto" }}
+            />
+          ) : null}
         </div>
         <div className="flex justify-center">
           <button className="w-full rounded bg-emerald-600 px-5 py-2.5 text-white hover:bg-emerald-700 disabled:opacity-50 sm:w-auto" onClick={runPredict} disabled={!sessionReady}>Prediksi</button>

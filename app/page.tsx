@@ -1,7 +1,15 @@
 import Link from 'next/link'
-import Image from 'next/image'
 import { cookies } from 'next/headers'
 import { createClient } from '../utils/supabase/server'
+
+// Helper to check if a URL is valid for images
+const isValidImageUrl = (url: string): boolean => {
+  if (!url || typeof url !== 'string') return false
+  const trimmed = url.trim()
+  if (!trimmed) return false
+  // Must start with / or http:// or https://
+  return trimmed.startsWith('/') || trimmed.startsWith('http://') || trimmed.startsWith('https://')
+}
 
 export default async function HomePage() {
   const supabase = createClient(cookies())
@@ -35,12 +43,12 @@ export default async function HomePage() {
           </div>
         </div>
         <div className="flex justify-center md:justify-end">
-          <Image
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
             src="/brandProfile-large.png"
             alt="SkinAI brand profile"
             width={640}
             height={480}
-            priority
             className="h-auto w-full max-w-[640px] rounded-lg border border-neutral-200"
           />
         </div>
@@ -55,10 +63,12 @@ export default async function HomePage() {
           {(latest ?? []).map((a) => {
             const src = extractDirectUrl(a.cover_url)
             const href = extractDirectUrl(a.content_url)
+            const validImageSrc = isValidImageUrl(src) ? src : null
             const CardInner = (
               <article className="rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm transition hover:shadow-md">
-                {src ? (
-                  <Image src={src} alt={a.title} width={640} height={360} className="mb-3 h-40 w-full rounded-xl object-cover" />
+                {validImageSrc ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img src={validImageSrc} alt={a.title} width={640} height={360} className="mb-3 h-40 w-full rounded-xl object-cover" />
                 ) : null}
                 <h3 className="line-clamp-2 text-lg font-semibold text-neutral-900">{a.title}</h3>
                 <p className="mt-2 line-clamp-3 text-sm text-neutral-700">{a.summary}</p>
