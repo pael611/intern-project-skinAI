@@ -1,11 +1,13 @@
 import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY as string
+import { requireEnv } from "@/lib/env.server"
 
 export const createClient = (cookieStore: ReturnType<typeof cookies>) => {
-  return createServerClient(supabaseUrl!, supabaseKey!, {
+  const supabaseUrl = requireEnv("NEXT_PUBLIC_SUPABASE_URL")
+  const supabaseKey = requireEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY")
+
+  return createServerClient(supabaseUrl, supabaseKey, {
     cookies: {
       getAll() {
         return cookieStore.getAll()

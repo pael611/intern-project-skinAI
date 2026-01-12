@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
+import { z } from 'zod'
+import { requireEnv } from '@/lib/env.server'
+
 export async function GET() {
   const cookieStore = cookies()
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY!,
+    requireEnv('NEXT_PUBLIC_SUPABASE_URL'),
+    requireEnv('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY'),
     {
       cookies: {
         getAll() {
@@ -32,8 +35,8 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const cookieStore = cookies()
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY!,
+    requireEnv('NEXT_PUBLIC_SUPABASE_URL'),
+    requireEnv('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY'),
     {
       cookies: {
         getAll() {
@@ -61,17 +64,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 })
   }
 
-  const body = await req.json()
-  const { title, summary, content_url, cover_url, source } = body as {
-    title: string
-    summary: string
-    content_url?: string
-    cover_url?: string
-    source?: 'koran' | 'bacaan'
+  const schema = z.object({
+    title: z.string().trim().min(1),
+    summary: z.string().trim().min(1),
+    content_url: z.string().optional(),
+    cover_url: z.string().optional(),
+    source: z.enum(['koran', 'bacaan']).optional(),
+  })
+
+  const body = await req.json().catch(() => null)
+  const parsed = schema.safeParse(body)
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Invalid payload', detail: parsed.error.flatten() }, { status: 400 })
   }
-  if (!title || !summary) {
-    return NextResponse.json({ error: 'Invalid payload' }, { status: 400 })
-  }
+
+  const { title, summary, content_url, cover_url, source } = parsed.data
 
   const sanitizeUrl = (url?: string) => {
     const val = String(url || '').trim()

@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 
+import { requireEnv } from '@/lib/env.server'
+
 function extractDirectUrl(url?: string) {
   const val = String(url || '').trim()
   if (!val) return ''
@@ -19,8 +21,8 @@ function extractDirectUrl(url?: string) {
 export async function POST() {
   const cookieStore = cookies()
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY!,
+    requireEnv('NEXT_PUBLIC_SUPABASE_URL'),
+    requireEnv('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY'),
     {
       cookies: {
         getAll() {

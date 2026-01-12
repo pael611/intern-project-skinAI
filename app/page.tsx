@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import Image from 'next/image'
 import { cookies } from 'next/headers'
 import { createClient } from '../utils/supabase/server'
 
@@ -43,13 +44,14 @@ export default async function HomePage() {
           </div>
         </div>
         <div className="flex justify-center md:justify-end">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
+          <Image
             src="/brandProfile-large.png"
             alt="SkinAI brand profile"
             width={640}
             height={480}
+            sizes="(max-width: 768px) 100vw, 640px"
             className="h-auto w-full max-w-[640px] rounded-lg border border-neutral-200"
+            priority
           />
         </div>
       </section>
@@ -67,8 +69,14 @@ export default async function HomePage() {
             const CardInner = (
               <article className="rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm transition hover:shadow-md">
                 {validImageSrc ? (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img src={validImageSrc} alt={a.title} width={640} height={360} className="mb-3 h-40 w-full rounded-xl object-cover" />
+                  <Image
+                    src={validImageSrc}
+                    alt={a.title}
+                    width={640}
+                    height={360}
+                    sizes="(max-width: 768px) 100vw, 33vw"
+                    className="mb-3 h-40 w-full rounded-xl object-cover"
+                  />
                 ) : null}
                 <h3 className="line-clamp-2 text-lg font-semibold text-neutral-900">{a.title}</h3>
                 <p className="mt-2 line-clamp-3 text-sm text-neutral-700">{a.summary}</p>

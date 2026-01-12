@@ -5,16 +5,19 @@ import { createClient as createAdmin } from '@supabase/supabase-js'
 
 export async function POST() {
   try {
-    const cookieStore = await cookies()
+    const cookieStore = cookies()
     const supabase = createClient(cookieStore)
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
     const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY
-    const admin = serviceRole ? createAdmin(supabaseUrl, serviceRole) : null
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const admin = serviceRole && supabaseUrl ? createAdmin(supabaseUrl, serviceRole) : null
 
     // Upsert into app_users table (id references auth.users.id), default role 'user'
+    if (serviceRole && !supabaseUrl) {
+      return NextResponse.json({ error: 'Missing NEXT_PUBLIC_SUPABASE_URL' }, { status: 500 })
+    }
     if (!admin) return NextResponse.json({ ok: true, skipped: true })
 
     const { error } = await admin.from('app_users').upsert({
