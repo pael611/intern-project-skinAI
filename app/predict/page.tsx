@@ -57,6 +57,11 @@ const categories = [
   "Wrinkles",
 ]
 
+const FACE_NOT_DETECTED_MESSAGE =
+  "Wajah tidak terdeteksi sempurna, mungkin hasil prediksi tidak akurat namun anda tetap bisa melakukan prediksi"
+
+const FACE_NOT_DETECTED_SHORT = "Wajah tidak terdeteksi sempurna. Prediksi mungkin kurang akurat."
+
 export default function PredictPage() {
   const [sessionReady, setSessionReady] = useState(false)
   const [loadingMsg, setLoadingMsg] = useState<string>("Loading ONNX model…")
@@ -64,6 +69,7 @@ export default function PredictPage() {
   const [resultHtml, setResultHtml] = useState<string>("")
   const [predictedTag, setPredictedTag] = useState<string | null>(null)
   const [faceDetected, setFaceDetected] = useState<boolean | null>(null)
+  const [lastFaceDetected, setLastFaceDetected] = useState<boolean | null>(null)
   const [cameraActive, setCameraActive] = useState(false)
   const [previewSrc, setPreviewSrc] = useState<string | null>(null)
 
@@ -186,6 +192,7 @@ export default function PredictPage() {
     
     // Reset face detection state
     setFaceDetected(null)
+    setLastFaceDetected(null)
     setPredictedTag(null)
     setResultHtml("")
     
@@ -202,16 +209,18 @@ export default function PredictPage() {
         try {
           const hasFace = await detectFromImage(probe)
           setFaceDetected(hasFace)
+          setLastFaceDetected(hasFace)
 
           if (hasFace) {
             setResult('<div class="text-emerald-600">✅ Wajah terdeteksi! Silakan klik Prediksi.</div>')
           } else {
-            setResult('<div class="text-amber-600">⚠️ Tidak ada wajah terdeteksi. Pastikan gambar berisi wajah yang jelas.</div>')
+            setResult('<div class="text-amber-600">⚠️ Wajah tidak terdeteksi. Anda tetap bisa melakukan prediksi.</div>')
           }
         } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : String(e)
           setFaceDetected(false)
-          setResult(`<div class="text-amber-600">⚠️ Gagal mendeteksi wajah: ${msg}</div>`)
+          setLastFaceDetected(false)
+          setResult(`<div class="text-amber-600">⚠️ Gagal mendeteksi wajah: ${msg}<br/>Anda tetap bisa melakukan prediksi.</div>`)
         }
       }
       probe.src = src
@@ -469,6 +478,7 @@ export default function PredictPage() {
       await videoRef.current.play().catch(() => {})
       setCameraActive(true)
       setFaceDetected(null)
+      setLastFaceDetected(null)
       setPredictedTag(null)
       setResult('<div class="text-blue-600 animate-pulse">🔍 Memulai deteksi wajah...</div>')
       
@@ -492,7 +502,7 @@ export default function PredictPage() {
     }
   }
 
-  function stopCamera() {
+  function stopCamera(options?: { keepResult?: boolean }) {
     // Stop face detection
     stopContinuousDetection()
     setCameraActive(false)
@@ -506,17 +516,14 @@ export default function PredictPage() {
       videoRef.current.style.display = "none"
     }
     setFaceDetected(null)
-    setResult("")
+    if (!options?.keepResult) setResult("")
   }
 
   async function captureFrame() {
     if (!videoRef.current || !canvasRef.current) return
-    
-    // Check if face is detected before capturing
-    if (!faceDetected) {
-      setResult('<div class="text-amber-600">⚠️ Tidak ada wajah terdeteksi. Posisikan wajah Anda di depan kamera.</div>')
-      return
-    }
+
+    const capturedHasFace = faceDetected === true
+    setLastFaceDetected(capturedHasFace)
     
     const vw = videoRef.current.videoWidth
     const vh = videoRef.current.videoHeight
@@ -539,31 +546,43 @@ export default function PredictPage() {
     setPreviewSrc(dataUrl)
     
     // Stop camera after capture
-    stopCamera()
-    
+    stopCamera({ keepResult: true })
+
     setResult('<div class="text-emerald-600">✅ Foto berhasil diambil! Silakan klik Prediksi.</div>')
   }
 
   return (
     <main className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
-      <h2 className="mb-6 text-center text-2xl font-bold">Prediksi Penyakit Kulit Wajah (ONNX)</h2>
+      <h2 className="mb-6 text-center text-2xl font-bold">Prediksi Penyakit Kulit Wajah</h2>
       <div className="space-y-4">
         <input type="file" accept="image/*" className="w-full rounded border border-neutral-300 px-3 py-2 focus:border-emerald-600 focus:outline-none" onChange={onFileChange} />
         <div className="flex flex-wrap items-center justify-center gap-3">
           <button className="w-full rounded border border-neutral-300 px-4 py-2 text-neutral-700 hover:bg-neutral-100 sm:w-auto" onClick={startCamera}>Buka Kamera</button>
           <button 
             className={`w-full rounded border px-4 py-2 sm:w-auto ${
-              faceDetected 
-                ? "border-emerald-600 text-emerald-700 hover:bg-emerald-50" 
-                : "border-neutral-300 text-neutral-400 cursor-not-allowed"
+              !cameraActive
+                ? "border-neutral-300 text-neutral-400 cursor-not-allowed"
+                : faceDetected
+                  ? "border-emerald-600 text-emerald-700 hover:bg-emerald-50"
+                  : "border-amber-500 text-amber-700 hover:bg-amber-50"
             }`} 
             onClick={captureFrame}
-            disabled={!faceDetected}
+            disabled={!cameraActive}
           >
             Ambil Foto
           </button>
-          <button className="w-full rounded border border-red-600 px-4 py-2 text-red-700 hover:bg-red-50 sm:w-auto" onClick={stopCamera}>Matikan Kamera</button>
+          <button className="w-full rounded border border-red-600 px-4 py-2 text-red-700 hover:bg-red-50 sm:w-auto" onClick={() => stopCamera()}>Matikan Kamera</button>
         </div>
+
+        {/* Non-blocking warning (only before prediction result) */}
+        {lastFaceDetected === false && !predictedTag && (
+          <div
+            className="mx-auto max-w-md rounded-lg border border-amber-200 bg-amber-50 p-3 text-center text-sm text-amber-800"
+            title={FACE_NOT_DETECTED_MESSAGE}
+          >
+            {FACE_NOT_DETECTED_SHORT}
+          </div>
+        )}
         
         {/* Face Detection Status Indicator */}
         {cameraActive && (
@@ -594,7 +613,7 @@ export default function PredictPage() {
                     <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/>
                     <path d="M15 9l-6 6M9 9l6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
                   </svg>
-                  <span>Tidak ada wajah - Posisikan wajah di depan kamera</span>
+                  <span>Wajah tidak terdeteksi (Anda tetap bisa ambil foto)</span>
                 </>
               )}
             </div>
@@ -633,7 +652,13 @@ export default function PredictPage() {
           ) : null}
         </div>
         <div className="flex justify-center">
-          <button className="w-full rounded bg-emerald-600 px-5 py-2.5 text-white hover:bg-emerald-700 disabled:opacity-50 sm:w-auto" onClick={runPredict} disabled={!sessionReady}>Prediksi</button>
+          <button
+            className="w-full rounded bg-emerald-600 px-5 py-2.5 text-white hover:bg-emerald-700 disabled:opacity-50 sm:w-auto"
+            onClick={runPredict}
+            disabled={!sessionReady || !previewSrc}
+          >
+            Prediksi
+          </button>
         </div>
         {sessionReady ? (
           resultHtml ? (
@@ -642,10 +667,6 @@ export default function PredictPage() {
             <div className="mx-auto max-w-md">
               <div className="rounded-lg border border-emerald-200 bg-white p-4 text-sm text-neutral-800 shadow-sm">
                 <div className="flex items-center gap-2">
-                  <svg className="h-5 w-5 text-emerald-600" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M12 2a10 10 0 100 20 10 10 0 000-20z" stroke="currentColor" strokeWidth="1.5" />
-                    <path d="M8 12l2.5 2.5L16 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
                   <span className="font-medium">Model berhasil dimuat</span>
                 </div>
                 <p className="mt-2 text-neutral-700">Unggah gambar atau gunakan kamera, lalu tekan <span className="font-semibold">Prediksi</span> untuk mulai.</p>
