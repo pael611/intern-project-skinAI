@@ -48,6 +48,10 @@ type OrtNamespace = {
 const MODEL_URL = "/model/best_skin_model.onnx"
 // Match TF2ONNX export input signature: (None, 320, 320, 3)
 const INPUT_SIZE = 320
+// Capture preview at higher resolution than model input (cap to avoid huge data URLs)
+const CAPTURE_MAX_SIZE = 1024
+const CAPTURE_MIME: 'image/jpeg' | 'image/png' = 'image/jpeg'
+const CAPTURE_JPEG_QUALITY = 0.95
 const categories = [
   "Acne",
   "Blackheads",
@@ -466,8 +470,8 @@ export default function PredictPage() {
       const constraints: MediaStreamConstraints = {
         video: {
           facingMode: { ideal: "user" },
-          width: { ideal: 640 },
-          height: { ideal: 480 },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
         },
         audio: false,
       }
@@ -527,6 +531,11 @@ export default function PredictPage() {
     
     const vw = videoRef.current.videoWidth
     const vh = videoRef.current.videoHeight
+    if (!vw || !vh) {
+      setResult('<div class="text-amber-600">⚠️ Kamera belum siap. Tunggu sebentar lalu coba lagi.</div>')
+      return
+    }
+
     const ar = vw / vh
     let sx = 0,
       sy = 0,
@@ -539,10 +548,21 @@ export default function PredictPage() {
       sh = vw
       sy = (vh - sh) / 2
     }
+
+    // Capture a higher-res square crop for a sharper preview
+    const captureSize = Math.min(Math.max(1, Math.floor(Math.min(sw, sh))), CAPTURE_MAX_SIZE)
+    canvasRef.current.width = captureSize
+    canvasRef.current.height = captureSize
     const ctx = canvasRef.current.getContext("2d")!
-    ctx.clearRect(0, 0, INPUT_SIZE, INPUT_SIZE)
-    ctx.drawImage(videoRef.current, sx, sy, sw, sh, 0, 0, INPUT_SIZE, INPUT_SIZE)
-    const dataUrl = canvasRef.current.toDataURL("image/png")
+    ctx.imageSmoothingEnabled = true
+    ;(ctx as unknown as { imageSmoothingQuality?: 'low' | 'medium' | 'high' }).imageSmoothingQuality = "high"
+    ctx.clearRect(0, 0, captureSize, captureSize)
+    ctx.drawImage(videoRef.current, sx, sy, sw, sh, 0, 0, captureSize, captureSize)
+
+    const dataUrl =
+      CAPTURE_MIME === 'image/jpeg'
+        ? canvasRef.current.toDataURL(CAPTURE_MIME, CAPTURE_JPEG_QUALITY)
+        : canvasRef.current.toDataURL(CAPTURE_MIME)
     setPreviewSrc(dataUrl)
     
     // Stop camera after capture
@@ -667,14 +687,15 @@ export default function PredictPage() {
             <div className="mx-auto max-w-md">
               <div className="rounded-lg border border-emerald-200 bg-white p-4 text-sm text-neutral-800 shadow-sm">
                 <div className="flex items-center gap-2">
+                  <svg className="h-5 w-5 text-emerald-600" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M12 2a10 10 0 100 20 10 10 0 000-20z" stroke="currentColor" strokeWidth="1.5" />
+                    <path d="M8 12l2.5 2.5L16 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
                   <span className="font-medium">Model berhasil dimuat</span>
                 </div>
                 <p className="mt-2 text-neutral-700">Unggah gambar atau gunakan kamera, lalu tekan <span className="font-semibold">Prediksi</span> untuk mulai.</p>
                 <div className="mt-3 flex items-center gap-2">
-                  <span className="inline-block h-2 w-2 animate-bounce rounded-full bg-emerald-500" />
-                  <span className="inline-block h-2 w-2 animate-bounce rounded-full bg-emerald-500 [animation-delay:150ms]" />
-                  <span className="inline-block h-2 w-2 animate-bounce rounded-full bg-emerald-500 [animation-delay:300ms]" />
-                </div>
+                  </div>
               </div>
             </div>
           )
