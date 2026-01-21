@@ -9,3 +9,4 @@ if (!supabaseUrl || !supabasePublishableKey) {
 }
 
 export const supabase = createBrowserClient(supabaseUrl ?? '', supabasePublishableKey ?? '')
+
