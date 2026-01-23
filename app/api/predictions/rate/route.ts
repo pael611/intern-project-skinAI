@@ -25,7 +25,15 @@ export async function GET(req: NextRequest) {
 
     const { data: { user }, error: userErr } = await supabase.auth.getUser()
     if (userErr) {
-      return NextResponse.json({ error: userErr.message }, { status: 500 })
+      const msg = userErr.message || 'Auth error'
+      // Supabase may return this when there is no session; treat as unauthenticated.
+      if (msg.toLowerCase().includes('auth session missing')) {
+        return NextResponse.json(
+          { error: 'Not authenticated' },
+          { status: 401, headers: { 'Cache-Control': 'no-store' } }
+        )
+      }
+      return NextResponse.json({ error: msg }, { status: 500 })
     }
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401, headers: { 'Cache-Control': 'no-store' } })
@@ -79,7 +87,11 @@ export async function POST(req: NextRequest) {
 
     const { data: { user }, error: userErr } = await supabase.auth.getUser()
     if (userErr) {
-      return NextResponse.json({ error: userErr.message }, { status: 500 })
+      const msg = userErr.message || 'Auth error'
+      if (msg.toLowerCase().includes('auth session missing')) {
+        return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+      }
+      return NextResponse.json({ error: msg }, { status: 500 })
     }
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
