@@ -1,7 +1,40 @@
 "use client"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type ChangeEvent } from "react"
 import Image from "next/image"
 import { useFaceDetection } from "@/hooks/useFaceDetection"
+
+// Penambahan fitur untuk rating produk yang direkomendasikan dan simpan ke history prediksi dari user yang melakukan rating
+async function rateProduct(payload: {
+  predictionId?: string | null
+  productId: string | number
+  rating: number
+  brand?: string
+  productName?: string
+  tag?: string
+}) {
+  try {
+    const res = await fetch("/api/predictions/rate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        predictionId: payload.predictionId ?? undefined,
+        productId: payload.productId,
+        rating: payload.rating,
+        brand: payload.brand,
+        productName: payload.productName,
+        tag: payload.tag,
+      }),
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => "")
+      throw new Error(text || `Failed to save rating (${res.status})`)
+    }
+    return await res.json().catch(() => null)
+  } catch (e) {
+    console.error("Rate product error:", e)
+    throw e
+  }
+}
 
 // Helper: save prediction history via API
 async function savePrediction(payload: { label: string; confidence: number; source: "upload" | "camera"; occurred_at?: string }) {
@@ -20,15 +53,28 @@ async function savePrediction(payload: { label: string; confidence: number; sour
     console.error("Save prediction error:", e)
     return null
   }
+
 }
 
 type TreatmentRow = {
-  Id: string
+  Id: number | string
+  Label?: string
   Brand: string
   "Product Name": string
   Price: string
   Links: string
   Tags: string
+}
+
+type OnlineProductRow = {
+  id_product: number
+  nama_product: string
+  label: string
+  brand: string
+  harga: string
+  gambar: string | null
+  link: string
+  created_at: string
 }
 
 type OrtTensor = unknown
@@ -72,6 +118,9 @@ export default function PredictPage() {
   const [treatments, setTreatments] = useState<TreatmentRow[]>([])
   const [resultHtml, setResultHtml] = useState<string>("")
   const [predictedTag, setPredictedTag] = useState<string | null>(null)
+  const [lastPredictionId, setLastPredictionId] = useState<string | null>(null)
+  const [onlineProducts, setOnlineProducts] = useState<OnlineProductRow[]>([])
+  const [onlineProductsError, setOnlineProductsError] = useState<string | null>(null)
   const [faceDetected, setFaceDetected] = useState<boolean | null>(null)
   const [lastFaceDetected, setLastFaceDetected] = useState<boolean | null>(null)
   const [cameraActive, setCameraActive] = useState(false)
@@ -104,6 +153,35 @@ export default function PredictPage() {
       .then((r) => r.json())
       .then((data) => setTreatments(data))
       .catch(() => {})
+  }, [])
+
+  // Load online products from Supabase via API
+  useEffect(() => {
+    let cancelled = false
+    async function loadOnlineProducts() {
+      try {
+        setOnlineProductsError(null)
+        const res = await fetch('/api/products?limit=200', { cache: 'no-store' })
+        const json = (await res.json().catch(() => null)) as { ok?: boolean; data?: OnlineProductRow[]; error?: string } | null
+        if (!res.ok) {
+          throw new Error(json?.error || `Failed to load products (${res.status})`)
+        }
+        if (!cancelled) {
+          setOnlineProducts(Array.isArray(json?.data) ? json!.data! : [])
+        }
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e)
+        if (!cancelled) {
+          setOnlineProducts([])
+          setOnlineProductsError(msg)
+        }
+      }
+    }
+
+    void loadOnlineProducts()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   // Draw face detection overlay on video
@@ -190,7 +268,7 @@ export default function PredictPage() {
     setResultHtml(html)
   }
 
-  async function onFileChange(ev: React.ChangeEvent<HTMLInputElement>) {
+  async function onFileChange(ev: ChangeEvent<HTMLInputElement>) {
     const file = ev.target.files?.[0]
     if (!file) return
     
@@ -198,6 +276,7 @@ export default function PredictPage() {
     setFaceDetected(null)
     setLastFaceDetected(null)
     setPredictedTag(null)
+    setLastPredictionId(null)
     setResultHtml("")
     
     const reader = new FileReader()
@@ -306,7 +385,9 @@ export default function PredictPage() {
         setResult(html)
 
         // Save to history (anonymous or with user if signed-in)
-        await savePrediction({ label, confidence: Number((bestScore).toFixed(6)), source: camStreamRef.current ? "camera" : "upload", occurred_at: new Date().toISOString() })
+        const saved = await savePrediction({ label, confidence: Number((bestScore).toFixed(6)), source: camStreamRef.current ? "camera" : "upload", occurred_at: new Date().toISOString() })
+        const savedId = (saved as { data?: { id?: string } } | null)?.data?.id
+        if (savedId) setLastPredictionId(savedId)
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : String(e)
         setResult(`Inference failed: ${message}`)
@@ -317,18 +398,131 @@ export default function PredictPage() {
 
   function Recommendations({ tag }: { tag: string }) {
     const imageCacheRef = useRef(new Map<string, string | null>())
-    const produk = treatments.filter((row) => row.Tags?.toLowerCase() === tag.toLowerCase())
-    if (produk.length === 0) {
-      return <div className="mt-4 rounded border border-amber-200 bg-amber-50 p-3 text-amber-800 dark:border-amber-400/30 dark:bg-neutral-900 dark:text-amber-300">Tidak ada rekomendasi produk untuk kategori ini.</div>
+    const [ratings, setRatings] = useState<Record<string, number>>({})
+    const [ratingsLoaded, setRatingsLoaded] = useState(false)
+    const [ratingError, setRatingError] = useState<string | null>(null)
+    const [savingProductId, setSavingProductId] = useState<string | null>(null)
+    const [canRate, setCanRate] = useState<boolean>(true)
+
+    const produkLocal = treatments.filter((row) => row.Tags?.toLowerCase() === tag.toLowerCase())
+    const produkOnline = onlineProducts.filter((p) => String(p.label || '').toLowerCase() === tag.toLowerCase())
+
+    const productIds = Array.from(
+      new Set(
+        [...produkLocal.map((row) => String(row.Id ?? '').trim()), ...produkOnline.map((p) => String(p.id_product ?? '').trim())]
+          .filter(Boolean)
+      )
+    ).slice(0, 200)
+
+    const productIdsKey = productIds.join(",")
+
+    useEffect(() => {
+      let cancelled = false
+      async function loadRatings() {
+        setRatingsLoaded(false)
+        setRatingError(null)
+        try {
+          if (!productIdsKey) {
+            if (!cancelled) {
+              setRatings({})
+              setRatingsLoaded(true)
+              setCanRate(true)
+            }
+            return
+          }
+
+          const qs = encodeURIComponent(productIdsKey)
+          const res = await fetch(`/api/predictions/rate?productIds=${qs}`, { cache: "no-store" })
+
+          if (res.status === 401) {
+            if (!cancelled) {
+              setRatings({})
+              setRatingsLoaded(true)
+              setCanRate(false)
+            }
+            return
+          }
+
+          if (!cancelled) setCanRate(true)
+
+          const json = (await res.json().catch(() => null)) as { ok?: boolean; ratings?: Record<string, number>; error?: string } | null
+          if (!res.ok) {
+            const msg = json?.error || `Failed to load ratings (${res.status})`
+            throw new Error(msg)
+          }
+
+          if (!cancelled) {
+            setRatings(json?.ratings ?? {})
+            setRatingsLoaded(true)
+          }
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e)
+          if (!cancelled) {
+            setRatings({})
+            setRatingsLoaded(true)
+            setRatingError(msg)
+            setCanRate(true)
+          }
+        }
+      }
+
+      void loadRatings()
+      return () => {
+        cancelled = true
+      }
+      // Only refetch when tag/products change
+    }, [tag, productIdsKey])
+
+    const items = [
+      ...produkLocal.map((row, idx) => ({
+        kind: 'local' as const,
+        idx,
+        id: String(row.Id),
+        brand: row.Brand,
+        name: row['Product Name'],
+        price: row.Price,
+        link: row.Links,
+        tag,
+        image: { type: 'local' as const, productId: row.Id },
+      })),
+      ...produkOnline.map((p, idx) => ({
+        kind: 'online' as const,
+        idx: produkLocal.length + idx,
+        id: String(p.id_product),
+        brand: p.brand,
+        name: p.nama_product,
+        price: p.harga,
+        link: p.link,
+        tag: p.label || tag,
+        image: { type: 'url' as const, src: p.gambar },
+      })),
+    ]
+
+    const itemsSorted = items
+      .slice()
+      .sort((a, b) => {
+        const ra = ratings[a.id] ?? 0
+        const rb = ratings[b.id] ?? 0
+        if (rb !== ra) return rb - ra
+        return a.idx - b.idx
+      })
+
+    if (itemsSorted.length === 0) {
+      return (
+        <div className="mt-4 rounded border border-amber-200 bg-amber-50 p-3 text-amber-800 dark:border-amber-400/30 dark:bg-neutral-900 dark:text-amber-300">
+          Tidak ada rekomendasi produk untuk kategori ini.
+        </div>
+      )
     }
 
-    function ProductImage({ productId }: { productId: string }) {
-      const [src, setSrc] = useState<string | null>(() => imageCacheRef.current.get(productId) ?? null)
-      const [missing, setMissing] = useState<boolean>(() => imageCacheRef.current.get(productId) === null)
+    function ProductImage({ productId }: { productId: string | number }) {
+      const pid = String(productId ?? "")
+      const [src, setSrc] = useState<string | null>(() => imageCacheRef.current.get(pid) ?? null)
+      const [missing, setMissing] = useState<boolean>(() => imageCacheRef.current.get(pid) === null)
 
       useEffect(() => {
         let cancelled = false
-        const cached = imageCacheRef.current.get(productId)
+        const cached = imageCacheRef.current.get(pid)
         if (cached !== undefined) {
           setSrc(cached)
           setMissing(cached === null)
@@ -336,8 +530,8 @@ export default function PredictPage() {
         }
 
         async function resolve() {
-          if (!productId) {
-            imageCacheRef.current.set(productId, null)
+          if (!pid) {
+            imageCacheRef.current.set(pid, null)
             if (!cancelled) {
               setSrc(null)
               setMissing(true)
@@ -347,11 +541,11 @@ export default function PredictPage() {
 
           const exts = ["png", "jpg"]
           for (const ext of exts) {
-            const url = `/skincare_product/gambar_produk/${productId}.${ext}`
+            const url = `/skincare_product/gambar_produk/${pid}.${ext}`
             try {
               const head = await fetch(url, { method: "HEAD", cache: "force-cache" })
               if (head.ok) {
-                imageCacheRef.current.set(productId, url)
+                imageCacheRef.current.set(pid, url)
                 if (!cancelled) {
                   setSrc(url)
                   setMissing(false)
@@ -363,7 +557,7 @@ export default function PredictPage() {
               if (head.status === 405 || head.status === 501) {
                 const get = await fetch(url, { method: "GET", cache: "force-cache" })
                 if (get.ok) {
-                  imageCacheRef.current.set(productId, url)
+                  imageCacheRef.current.set(pid, url)
                   if (!cancelled) {
                     setSrc(url)
                     setMissing(false)
@@ -376,7 +570,7 @@ export default function PredictPage() {
             }
           }
 
-          imageCacheRef.current.set(productId, null)
+          imageCacheRef.current.set(pid, null)
           if (!cancelled) {
             setSrc(null)
             setMissing(true)
@@ -387,7 +581,7 @@ export default function PredictPage() {
         return () => {
           cancelled = true
         }
-      }, [productId])
+      }, [pid])
 
       if (missing) {
         return (
@@ -410,39 +604,163 @@ export default function PredictPage() {
           sizes="96px"
           className="h-24 w-24 rounded-xl object-cover ring-1 ring-emerald-100 group-hover:ring-emerald-200 dark:ring-emerald-700/50"
           onError={() => {
-            imageCacheRef.current.set(productId, null)
+            imageCacheRef.current.set(pid, null)
             setMissing(true)
           }}
         />
       )
     }
 
+    function OnlineImage({ src, alt }: { src: string | null; alt: string }) {
+      if (!src) {
+        return <div className="h-24 w-24 rounded-xl bg-neutral-100 ring-1 ring-emerald-100 dark:bg-neutral-800 dark:ring-emerald-700/50" />
+      }
+      return (
+        <Image
+          src={src}
+          alt={alt}
+          width={96}
+          height={96}
+          sizes="96px"
+          unoptimized
+          className="h-24 w-24 rounded-xl object-cover ring-1 ring-emerald-100 group-hover:ring-emerald-200 dark:ring-emerald-700/50"
+        />
+      )
+    }
+
+    function StarRating({ productId, brand, productName }: { productId: string | number; brand: string; productName: string }) {
+      const pid = String(productId ?? "")
+      const current = ratings[pid] ?? 0
+      const isSaving = savingProductId === pid
+      const isDisabled = !canRate || isSaving
+
+      const setRating = async (value: number) => {
+        if (!canRate) {
+          setRatingError('Silakan login terlebih dahulu untuk memberi rating.')
+          return
+        }
+        setSavingProductId(pid)
+        setRatingError(null)
+        try {
+          await rateProduct({
+            predictionId: lastPredictionId,
+            productId: pid,
+            rating: value,
+            brand,
+            productName,
+            tag,
+          })
+          setRatings((prev) => ({ ...prev, [pid]: value }))
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e)
+          // If user not logged in, the API returns 401.
+          if (msg.includes('401') || msg.toLowerCase().includes('not authenticated')) {
+            setRatingError('Silakan login untuk memberi rating.')
+          } else {
+            setRatingError(msg)
+          }
+        } finally {
+          setSavingProductId(null)
+        }
+      }
+
+      return (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1" aria-label={`Rating untuk ${brand} ${productName}`}>
+            {Array.from({ length: 5 }).map((_, i) => {
+              const value = i + 1
+              const active = value <= current
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => void setRating(value)}
+                  disabled={isDisabled}
+                  className={`h-8 w-8 rounded-md border text-sm transition will-change-transform hover:-translate-y-[1px] active:translate-y-0 ${
+                    active
+                      ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                      : "border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50"
+                  } disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-800/40 dark:bg-emerald-950/30 dark:text-neutral-100 dark:hover:bg-emerald-900/30`}
+                  title={!canRate ? 'Login untuk memberi rating' : `Beri rating ${value}`}
+                >
+                  ★
+                </button>
+              )
+            })}
+          </div>
+
+          <span className="text-xs text-neutral-500 dark:text-neutral-400">
+            {current ? `Rating Anda: ${current}/5` : "Belum dirating"}
+          </span>
+
+          {isSaving ? <span className="text-xs text-neutral-500 dark:text-neutral-400">Menyimpan…</span> : null}
+        </div>
+      )
+    }
+
     return (
       <div className="mt-8">
         <h4 className="mb-4 text-xl font-extrabold tracking-tight text-emerald-900">Rekomendasi Produk</h4>
+        {!ratingsLoaded ? (
+          <div className="mb-3 text-sm text-neutral-600">Memuat preferensi rating Anda…</div>
+        ) : null}
+        {!canRate ? (
+          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            Untuk memberi rating produk, Anda harus <a className="font-semibold underline" href="/login?redirect=/predict">login</a> terlebih dahulu.
+          </div>
+        ) : null}
+        {ratingError ? (
+          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{ratingError}</div>
+        ) : null}
+        {onlineProductsError ? (
+          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            Gagal memuat produk online: {onlineProductsError}
+          </div>
+        ) : null}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {produk.map((row) => {
+          {itemsSorted.map((item) => {
             return (
               <div
-                key={row.Id || row["Product Name"]}
-                className="group flex items-center gap-4 rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm transition hover:shadow-md dark:border-emerald-800/40 dark:bg-emerald-900/20"
+                key={`${item.kind}-${item.id}`}
+                className="group flex flex-col gap-4 overflow-hidden rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-emerald-800/40 dark:bg-emerald-900/20 sm:flex-row sm:items-center"
               >
-                <ProductImage productId={row.Id} />
+                <div className="shrink-0 self-start sm:self-auto">
+                  {item.image.type === 'local' ? (
+                    <ProductImage productId={item.image.productId} />
+                  ) : (
+                    <OnlineImage src={item.image.src ?? null} alt={item.name} />
+                  )}
+                </div>
+
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm text-neutral-500">{row.Brand}</div>
-                  <div className="truncate text-lg font-semibold text-neutral-900">{row["Product Name"]}</div>
-                  <div className="mt-1 inline-flex items-center gap-2 text-xs">
-                    <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700">{row.Price}</span>
-                    <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-neutral-700">{tag}</span>
+                  <div className="truncate text-sm text-neutral-500 dark:text-neutral-400">{item.brand}</div>
+                  <div className="truncate text-lg font-semibold text-neutral-900 dark:text-neutral-100">{item.name}</div>
+
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">
+                      {item.price}
+                    </span>
+                    <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200">
+                      {item.tag}
+                    </span>
+                    {item.kind === 'online' ? (
+                      <span className="rounded-full bg-blue-50 px-2 py-0.5 font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-200">
+                        Online
+                      </span>
+                    ) : null}
                   </div>
-                  <div className="mt-3">
+
+                  <StarRating productId={item.id} brand={item.brand} productName={item.name} />
+
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
                     <a
-                      href={row.Links}
+                      href={item.link}
                       target="_blank"
-                      className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 px-3 py-1.5 text-sm font-medium text-emerald-800 transition hover:bg-emerald-50"
+                      rel="noreferrer"
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-200 px-3 py-2 text-sm font-medium text-emerald-800 transition hover:bg-emerald-50 dark:border-emerald-800/40 dark:text-emerald-100 dark:hover:bg-emerald-900/30 sm:w-auto"
                     >
                       Lihat Produk
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="text-emerald-700">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="text-emerald-700 dark:text-emerald-200">
                         <path d="M7 17L17 7M17 7H9M17 7V15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                     </a>
@@ -721,3 +1039,4 @@ export default function PredictPage() {
     </main>
   )
 }
+  
