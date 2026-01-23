@@ -1,5 +1,6 @@
 "use client";
 import React, { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { Plus, Search, Edit2, Trash2, ExternalLink, X } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -183,10 +184,14 @@ const ProductMasterAdmin: React.FC = () => {
                   <tr key={product.id_product} className="hover:bg-slate-50 transition-colors">
                     <td className="px-6 py-4 text-sm font-medium text-slate-900">{product.id_product}</td>
                     <td className="px-6 py-4">
-                      <img 
-                        src={product.gambar} 
+                      <Image
+                        src={product.gambar}
                         alt={product.nama_product}
+                        width={64}
+                        height={64}
                         className="w-16 h-16 object-cover rounded-lg"
+                        loader={({ src }) => src}
+                        unoptimized
                       />
                     </td>
                     <td className="px-6 py-4">
