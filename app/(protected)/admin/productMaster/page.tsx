@@ -24,6 +24,7 @@ type FormData = {
   gambar: string;
   link: string;
 }
+// add changes for folder name
 
 type LabelType = 'Acne' | 'Blackheads' | 'Dark Spots' | 'Normal Skin' | 'Oily Skin' | 'Wrinkles';
 
