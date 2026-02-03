@@ -114,9 +114,6 @@ const categories = [
   "Wrinkles",
 ]
 
-const FACE_NOT_DETECTED_MESSAGE =
-  "Wajah tidak terdeteksi sempurna, mungkin hasil prediksi tidak akurat namun anda tetap bisa melakukan prediksi"
-
 const FACE_NOT_DETECTED_SHORT = "Wajah tidak terdeteksi sempurna. Tetap tenang, prediksi masih bisa dilakukan."
 
 export default function PredictPage() {
