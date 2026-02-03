@@ -117,7 +117,7 @@ const categories = [
 const FACE_NOT_DETECTED_MESSAGE =
   "Wajah tidak terdeteksi sempurna, mungkin hasil prediksi tidak akurat namun anda tetap bisa melakukan prediksi"
 
-const FACE_NOT_DETECTED_SHORT = "Wajah tidak terdeteksi sempurna. Prediksi mungkin kurang akurat."
+const FACE_NOT_DETECTED_SHORT = "Wajah tidak terdeteksi sempurna. Tetap tenang, prediksi masih bisa dilakukan."
 
 export default function PredictPage() {
   const [sessionReady, setSessionReady] = useState(false)
@@ -302,9 +302,9 @@ export default function PredictPage() {
           setLastFaceDetected(hasFace)
 
           if (hasFace) {
-            setResult('<div class="text-emerald-600">✅ Wajah terdeteksi! Silakan klik Prediksi.</div>')
+            setResult('<div class="text-emerald-600">Wajah terdeteksi! Silakan klik Prediksi.</div>')
           } else {
-            setResult('<div class="text-amber-600">⚠️ Wajah tidak terdeteksi. Anda tetap bisa melakukan prediksi.</div>')
+            setResult('<div class="text-amber-600"></div>')
           }
         } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : String(e)
@@ -975,7 +975,7 @@ export default function PredictPage() {
         {lastFaceDetected === false && !predictedTag && (
           <div
             className="mx-auto max-w-md rounded-lg border border-amber-200 bg-amber-50 p-3 text-center text-sm text-amber-800"
-            title={FACE_NOT_DETECTED_MESSAGE}
+            title={FACE_NOT_DETECTED_SHORT}
           >
             {FACE_NOT_DETECTED_SHORT}
           </div>
@@ -1010,7 +1010,6 @@ export default function PredictPage() {
                     <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/>
                     <path d="M15 9l-6 6M9 9l6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
                   </svg>
-                  <span>Wajah tidak terdeteksi (Anda tetap bisa ambil foto)</span>
                 </>
               )}
             </div>
