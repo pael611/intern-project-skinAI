@@ -108,7 +108,7 @@ const CAPTURE_JPEG_QUALITY = 0.95
 const categories = [
   "Acne",
   "Blackheads",
-  "Dark Spots",
+  "light Spots",
   "Normal Skin",
   "Oily Skin",
   "Wrinkles",
@@ -122,6 +122,7 @@ export default function PredictPage() {
   const [treatments, setTreatments] = useState<TreatmentRow[]>([])
   const [resultHtml, setResultHtml] = useState<string>("")
   const [predictedTag, setPredictedTag] = useState<string | null>(null)
+  const [predictionConfidence, setPredictionConfidence] = useState<number>(0)
   const [lastPredictionId, setLastPredictionId] = useState<string | null>(null)
   const [onlineProducts, setOnlineProducts] = useState<OnlineProductRow[]>([])
   const [onlineProductsError, setOnlineProductsError] = useState<string | null>(null)
@@ -129,6 +130,7 @@ export default function PredictPage() {
   const [lastFaceDetected, setLastFaceDetected] = useState<boolean | null>(null)
   const [cameraActive, setCameraActive] = useState(false)
   const [previewSrc, setPreviewSrc] = useState<string | null>(null)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -208,7 +210,7 @@ export default function PredictPage() {
 
       // Draw face bounding box if detected
       if (faceBox) {
-        drawFaceBox(ctx, canvas.width, canvas.height, "#22c55e")
+        drawFaceBox(ctx, canvas.width, canvas.height, "#10b981")
       }
 
       requestAnimationFrame(draw)
@@ -282,6 +284,7 @@ export default function PredictPage() {
     setPredictedTag(null)
     setLastPredictionId(null)
     setResultHtml("")
+    setPredictionConfidence(0)
     
     const reader = new FileReader()
     reader.onload = async () => {
@@ -292,16 +295,16 @@ export default function PredictPage() {
       const probe = new window.Image()
       probe.crossOrigin = "anonymous"
       probe.onload = async () => {
-        setResult('<div class="text-blue-600 animate-pulse">🔍 Mendeteksi wajah...</div>')
+        setResult('<div class="flex items-center gap-2 text-blue-600"><div class="h-4 w-4 animate-spin rounded-full border-2 border-blue-600 border-t-transparent"></div><span>Mendeteksi wajah...</span></div>')
         try {
           const hasFace = await detectFromImage(probe)
           setFaceDetected(hasFace)
           setLastFaceDetected(hasFace)
 
           if (hasFace) {
-            setResult('<div class="text-emerald-600">Wajah terdeteksi! Silakan klik Prediksi.</div>')
+            setResult('')
           } else {
-            setResult('<div class="text-amber-600"></div>')
+            setResult('')
           }
         } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : String(e)
@@ -367,6 +370,8 @@ export default function PredictPage() {
       setResult("Please upload an image first.")
       return
     }
+    
+    setIsAnalyzing(true)
     const img = new window.Image()
     img.crossOrigin = "anonymous"
     img.onload = async () => {
@@ -375,7 +380,8 @@ export default function PredictPage() {
         const feeds: Record<string, unknown> = {}
         const inputName = session.inputNames?.[0] ?? Object.keys(session.inputMetadata)[0]
         feeds[inputName] = imageTensorRef.current
-        setResult("Running inference…")
+        setResult('<div class="flex items-center gap-2 text-emerald-600"><div class="h-4 w-4 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent"></div><span>Menganalisis kondisi kulit...</span></div>')
+        
         const output = await session.run(feeds)
         const outName = session.outputNames?.[0] ?? Object.keys(output)[0]
         const scores: Float32Array = output[outName].data
@@ -384,9 +390,10 @@ export default function PredictPage() {
         const bestScore = scores[bestIdx]
         const label = categories[bestIdx] ?? `class_${bestIdx}`
 
-        const html = `<div class=\"rounded border border-emerald-200 bg-emerald-50 p-3 text-emerald-800\"><b>Prediksi:</b> ${label}<br/><b>Confidence:</b> ${(bestScore * 100).toFixed(2)}%</div>`
         setPredictedTag(label)
-        setResult(html)
+        setPredictionConfidence(bestScore)
+        setResult('')
+        setIsAnalyzing(false)
 
         // Save to history (anonymous or with user if signed-in)
         const saved = await savePrediction({ label, confidence: Number((bestScore).toFixed(6)), source: camStreamRef.current ? "camera" : "upload", occurred_at: new Date().toISOString() })
@@ -394,13 +401,14 @@ export default function PredictPage() {
         if (savedId) setLastPredictionId(savedId)
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : String(e)
-        setResult(`Inference failed: ${message}`)
+        setResult(`<div class="text-red-600">Inference failed: ${message}</div>`)
+        setIsAnalyzing(false)
       }
     }
     img.src = previewSrc
   }
 
-  function Recommendations({ tag }: { tag: string }) {
+  function Recommendations({ tag, confidence }: { tag: string; confidence: number }) {
     const imageCacheRef = useRef(new Map<string, string | null>())
     const [ratings, setRatings] = useState<Record<string, number>>({})
     const [ratingsLoaded, setRatingsLoaded] = useState(false)
@@ -480,7 +488,6 @@ export default function PredictPage() {
       return () => {
         cancelled = true
       }
-      // Only refetch when tag/products change
     }, [tag, productIdsKey])
 
     const items = [
@@ -519,8 +526,11 @@ export default function PredictPage() {
 
     if (itemsSorted.length === 0) {
       return (
-        <div className="mt-4 rounded border border-amber-200 bg-amber-50 p-3 text-amber-800 dark:border-amber-400/30 dark:bg-neutral-900 dark:text-amber-300">
-          Tidak ada rekomendasi produk untuk kategori ini.
+        <div className="mt-8 rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center text-amber-800 light:border-amber-400/30 light:bg-neutral-900 light:text-amber-300">
+          <svg className="mx-auto mb-3 h-12 w-12 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+          </svg>
+          <p className="font-semibold">Tidak ada rekomendasi produk untuk kategori ini.</p>
         </div>
       )
     }
@@ -563,7 +573,6 @@ export default function PredictPage() {
                 return
               }
 
-              // Some static hosts may not support HEAD; fallback to GET.
               if (head.status === 405 || head.status === 501) {
                 const get = await fetch(url, { method: "GET", cache: "force-cache" })
                 if (get.ok) {
@@ -595,24 +604,28 @@ export default function PredictPage() {
 
       if (missing) {
         return (
-          <div className="flex h-24 w-24 items-center justify-center rounded-xl bg-neutral-50 text-center text-[10px] leading-tight text-neutral-500 ring-1 ring-emerald-100 group-hover:ring-emerald-200 dark:bg-neutral-900 dark:text-neutral-400 dark:ring-emerald-700/50">
-            Gambar tidak tersedia
+          <div className="flex h-28 w-28 items-center justify-center rounded-2xl from-neutral-100 to-neutral-200 text-center text-xs leading-tight text-neutral-500 ring-2 ring-emerald-100/50 light:from-neutral-800 light:to-neutral-900 light:text-neutral-400 light:ring-emerald-700/30">
+            <svg className="h-10 w-10 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
           </div>
         )
       }
 
       if (!src) {
-        return <div className="h-24 w-24 animate-pulse rounded-xl bg-neutral-100 ring-1 ring-emerald-100 dark:bg-neutral-800 dark:ring-emerald-700/50" />
+        return (
+          <div className="h-28 w-28 animate-pulse rounded-2xl bg-gradient-to-br from-neutral-200 to-neutral-300 ring-2 ring-emerald-100/50 light:from-neutral-800 light:to-neutral-900 light:ring-emerald-700/30" />
+        )
       }
 
       return (
         <Image
           src={src}
           alt="produk"
-          width={96}
-          height={96}
-          sizes="96px"
-          className="h-24 w-24 rounded-xl object-cover ring-1 ring-emerald-100 group-hover:ring-emerald-200 dark:ring-emerald-700/50"
+          width={112}
+          height={112}
+          sizes="112px"
+          className="h-28 w-28 rounded-2xl object-cover ring-2 ring-emerald-100/50 transition-all duration-300 group-hover:ring-emerald-300 group-hover:shadow-lg light:ring-emerald-700/30"
           onError={() => {
             imageCacheRef.current.set(pid, null)
             setMissing(true)
@@ -623,17 +636,19 @@ export default function PredictPage() {
 
     function OnlineImage({ src, alt }: { src: string | null; alt: string }) {
       if (!src) {
-        return <div className="h-24 w-24 rounded-xl bg-neutral-100 ring-1 ring-emerald-100 dark:bg-neutral-800 dark:ring-emerald-700/50" />
+        return (
+          <div className="h-28 w-28 rounded-2xl bg-gradient-to-br from-neutral-200 to-neutral-300 ring-2 ring-emerald-100/50 light:from-neutral-800 light:to-neutral-900 light:ring-emerald-700/30" />
+        )
       }
       return (
         <Image
           src={src}
           alt={alt}
-          width={96}
-          height={96}
-          sizes="96px"
+          width={112}
+          height={112}
+          sizes="112px"
           unoptimized
-          className="h-24 w-24 rounded-xl object-cover ring-1 ring-emerald-100 group-hover:ring-emerald-200 dark:ring-emerald-700/50"
+          className="h-28 w-28 rounded-2xl object-cover ring-2 ring-emerald-100/50 transition-all duration-300 group-hover:ring-emerald-300 group-hover:shadow-lg light:ring-emerald-700/30"
         />
       )
     }
@@ -664,7 +679,6 @@ export default function PredictPage() {
           setRatings((prev) => ({ ...prev, [pid]: value }))
         } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : String(e)
-          // If user not logged in, the API returns 401.
           if (msg.includes('401') || msg.toLowerCase().includes('not authenticated') || msg.toLowerCase().includes('auth session missing')) {
             setRatingError(null)
             setCanRate(false)
@@ -678,8 +692,8 @@ export default function PredictPage() {
       }
 
       return (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <div className="flex flex-wrap items-center gap-1" aria-label={`Rating untuk ${brand} ${productName}`}>
+        <div className="mt-4 space-y-2">
+          <div className="flex flex-wrap items-center gap-1.5" aria-label={`Rating untuk ${brand} ${productName}`}>
             {Array.from({ length: 5 }).map((_, i) => {
               const value = i + 1
               const active = value <= current
@@ -689,11 +703,11 @@ export default function PredictPage() {
                   type="button"
                   onClick={() => void setRating(value)}
                   disabled={isDisabled}
-                  className={`h-8 w-8 rounded-md border text-sm transition will-change-transform hover:-translate-y-[1px] active:translate-y-0 ${
+                  className={`group/star relative h-9 w-9 rounded-lg border-2 text-lg font-bold transition-all duration-200 will-change-transform hover:scale-110 active:scale-95 ${
                     active
-                      ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-                      : "border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50"
-                  } disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-800/40 dark:bg-emerald-950/30 dark:text-neutral-100 dark:hover:bg-emerald-900/30`}
+                      ? "border-amber-400 bg-gradient-to-br from-amber-100 to-amber-50 text-amber-600 shadow-sm hover:shadow-md"
+                      : "border-neutral-300 bg-white text-neutral-400 hover:border-amber-300 hover:bg-amber-50/30"
+                  } disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100 light:border-amber-800/40 light:bg-emerald-950/30 light:text-neutral-100 light:hover:bg-emerald-900/30`}
                   title={!canRate ? 'Login untuk memberi rating' : `Beri rating ${value}`}
                 >
                   ★
@@ -702,129 +716,187 @@ export default function PredictPage() {
             })}
           </div>
 
-          <span className="text-xs text-neutral-500 dark:text-neutral-400">
-            {current ? `Rating Anda: ${current}/5` : "Belum dirating"}
-          </span>
-
-          {isSaving ? <span className="text-xs text-neutral-500 dark:text-neutral-400">Menyimpan…</span> : null}
+          <div className="flex items-center gap-2 text-xs">
+            <span className={`rounded-full px-2.5 py-1 font-medium ${current ? 'bg-emerald-100 text-emerald-700 light:bg-emerald-900/40 light:text-emerald-200' : 'bg-neutral-100 text-neutral-600 light:bg-neutral-800 light:text-neutral-400'}`}>
+              {current ? `★ ${current}/5` : "Belum dirating"}
+            </span>
+            {isSaving && (
+              <span className="flex items-center gap-1.5 text-neutral-500 light:text-neutral-400">
+                <div className="h-3 w-3 animate-spin rounded-full border-2 border-neutral-400 border-t-transparent"></div>
+                Menyimpan…
+              </span>
+            )}
+          </div>
         </div>
       )
     }
 
-    return (
-      <div className="mt-8">
-        <h4 className="mb-4 text-xl font-extrabold tracking-tight text-emerald-900">Rekomendasi Produk</h4>
-        {!ratingsLoaded ? (
-          <div className="mb-3 text-sm text-neutral-600">Memuat preferensi rating Anda…</div>
-        ) : null}
-        {showLoginPopup ? (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Login diperlukan"
-          >
-            <button
-              type="button"
-              className="absolute inset-0 bg-black/40"
-              aria-label="Tutup"
-              onClick={() => setShowLoginPopup(false)}
-            />
-            <div className="relative w-full max-w-md rounded-2xl border border-emerald-100 bg-white p-5 shadow-xl dark:border-emerald-800/40 dark:bg-neutral-950">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="text-lg font-semibold text-emerald-900 dark:text-emerald-100">Login diperlukan</div>
-                  <div className="mt-1 text-sm text-neutral-600 dark:text-neutral-300">
-                    Untuk memberi rating produk dan mempersonalisasi rekomendasi, silakan login terlebih dahulu.
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowLoginPopup(false)}
-                  className="rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
-                >
-                  Tutup
-                </button>
-              </div>
+    // Get severity level based on tag
+    const getSeverityInfo = (tag: string) => {
+      const severityMap: Record<string, { level: string; color: string; bgColor: string; description: string }> = {
+        "Acne": { level: "Moderate", color: "text-orange-700", bgColor: "bg-orange-100 light:bg-orange-900/30", description: "Perlu perawatan rutin" },
+        "Blackheads": { level: "Mild", color: "text-yellow-700", bgColor: "bg-yellow-100 light:bg-yellow-900/30", description: "Dapat diatasi dengan pembersihan" },
+        "light Spots": { level: "Moderate", color: "text-amber-700", bgColor: "bg-amber-100 light:bg-amber-900/30", description: "Gunakan produk pencerah" },
+        "Normal Skin": { level: "Healthy", color: "text-emerald-700", bgColor: "bg-emerald-100 light:bg-emerald-900/30", description: "Kulit dalam kondisi baik" },
+        "Oily Skin": { level: "Mild", color: "text-blue-700", bgColor: "bg-blue-100 light:bg-blue-900/30", description: "Kontrol minyak berlebih" },
+        "Wrinkles": { level: "Moderate", color: "text-purple-700", bgColor: "bg-purple-100 light:bg-purple-900/30", description: "Anti-aging diperlukan" },
+      }
+      return severityMap[tag] || { level: "Unknown", color: "text-neutral-700", bgColor: "bg-neutral-100", description: "" }
+    }
 
-              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
-                <a
-                  href="/login?redirect=/predict"
-                  className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
-                >
-                  Login
-                </a>
-                <button
-                  type="button"
-                  onClick={() => setShowLoginPopup(false)}
-                  className="inline-flex items-center justify-center rounded-lg border border-emerald-200 bg-white px-4 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50 dark:border-emerald-800/40 dark:bg-neutral-900 dark:text-emerald-100 dark:hover:bg-emerald-900/30"
-                >
-                  Nanti saja
-                </button>
+    const severityInfo = getSeverityInfo(tag)
+
+    return (
+      <div className="mt-12 animate-fadeIn">
+        {/* Result Card */}
+        <div className="mb-8 overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 p-8 shadow-2xl">
+          <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
+            <div className="flex-1">
+              <p className="mb-2 text-sm font-medium text-white/80">Hasil Diagnosa</p>
+              <h3 className="mb-3 text-4xl font-bold text-white">{tag}</h3>
+              <p className="mb-4 text-white/90">{severityInfo.description}</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`rounded-full px-4 py-1.5 text-sm font-semibold ${severityInfo.bgColor} ${severityInfo.color}`}>
+                  {severityInfo.level}
+                </span>
+              </div>
+            </div>
+            <div className="rounded-2xl bg-white/20 backdrop-blur-md p-6 text-center">
+              <p className="mb-1 text-sm font-medium text-white/80">Confidence</p>
+              <p className="text-5xl font-bold text-white">{(confidence * 100).toFixed(0)}%</p>
+              <div className="mt-3 h-2 w-32 overflow-hidden rounded-full bg-white/30">
+                <div 
+                  className="h-full rounded-full bg-white shadow-lg transition-all duration-1000"
+                  style={{ width: `${confidence * 100}%` }}
+                />
               </div>
             </div>
           </div>
-        ) : null}
-        {ratingError ? (
-          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{ratingError}</div>
-        ) : null}
-        {onlineProductsError ? (
-          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-            Gagal memuat produk online: {onlineProductsError}
+        </div>
+
+        {/* Recommendations Section */}
+        <div className="rounded-3xl bg-white p-8 shadow-xl light:bg-neutral-900">
+          <div className="mb-6 flex items-center gap-3">
+            <svg className="h-8 w-8 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+            </svg>
+            <h4 className="text-3xl font-bold text-neutral-900 light:text-neutral-100">Rekomendasi Produk</h4>
           </div>
-        ) : null}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {itemsSorted.map((item) => {
-            return (
-              <div
-                key={`${item.kind}-${item.id}`}
-                className="group flex flex-col gap-4 overflow-hidden rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-emerald-800/40 dark:bg-emerald-900/20 sm:flex-row sm:items-center"
-              >
-                <div className="shrink-0 self-start sm:self-auto">
-                  {item.image.type === 'local' ? (
-                    <ProductImage productId={item.image.productId} />
-                  ) : (
-                    <OnlineImage src={item.image.src ?? null} alt={item.name} />
-                  )}
+          
+          {!ratingsLoaded && (
+            <div className="mb-6 flex items-center gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-700 light:border-emerald-800/40 light:bg-emerald-900/20 light:text-emerald-200">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent"></div>
+              Memuat preferensi rating Anda…
+            </div>
+          )}
+          
+          {showLoginPopup && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Login diperlukan"
+            >
+              <div 
+                className="absolute inset-0 bg-black/60 transition-opacity" 
+                onClick={() => setShowLoginPopup(false)}
+              />
+              <div className="relative w-full max-w-md animate-slideUp rounded-3xl border-2 border-emerald-200 bg-white p-8 shadow-2xl light:border-emerald-800/40 light:bg-neutral-900">
+                <div className="mb-6">
+                  <div className="mb-3 inline-flex rounded-2xl bg-emerald-100 p-3 light:bg-emerald-900/40">
+                    <svg className="h-8 w-8 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                  </div>
+                  <h3 className="mb-2 text-2xl font-bold text-neutral-900 light:text-neutral-100">Login Diperlukan</h3>
+                  <p className="text-neutral-600 light:text-neutral-300">
+                    Untuk memberi rating produk dan mempersonalisasi rekomendasi, silakan login terlebih dahulu.
+                  </p>
                 </div>
 
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm text-neutral-500 dark:text-neutral-400">{item.brand}</div>
-                  <div className="truncate text-lg font-semibold text-neutral-900 dark:text-neutral-100">{item.name}</div>
-
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                    <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">
-                      {item.price}
-                    </span>
-                    <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200">
-                      {item.tag}
-                    </span>
-                    {item.kind === 'online' ? (
-                      <span className="rounded-full bg-blue-50 px-2 py-0.5 font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-200">
-                        Online
-                      </span>
-                    ) : null}
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <a
+                    href="/login?redirect=/predict"
+                    className="flex-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-3 text-center font-semibold text-white shadow-lg transition-all hover:shadow-xl hover:scale-105 active:scale-95"
+                  >
+                    Login Sekarang
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => setShowLoginPopup(false)}
+                    className="flex-1 rounded-xl border-2 border-emerald-200 bg-white px-6 py-3 font-semibold text-emerald-700 transition-all hover:bg-emerald-50 light:border-emerald-800/40 light:bg-neutral-800 light:text-emerald-200 light:hover:bg-emerald-900/30"
+                  >
+                    Nanti Saja
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {ratingError && (
+            <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 light:border-red-800/40 light:bg-red-900/20 light:text-red-200">
+              {ratingError}
+            </div>
+          )}
+          
+          {onlineProductsError && (
+            <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 light:border-amber-800/40 light:bg-amber-900/20 light:text-amber-200">
+              Gagal memuat produk online: {onlineProductsError}
+            </div>
+          )}
+          
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+            {itemsSorted.map((item, index) => (
+              <div
+                key={`${item.kind}-${item.id}`}
+                className="group relative overflow-hidden rounded-2xl border-2 border-emerald-100 bg-white p-6 shadow-md transition-all duration-300 hover:-translate-y-1 hover:border-emerald-300 hover:shadow-xl light:border-emerald-800/40 light:bg-neutral-800"
+                style={{ animationDelay: `${index * 50}ms` }}
+              >
+                <div className="flex flex-col gap-4 sm:flex-row">
+                  <div className="shrink-0">
+                    {item.image.type === 'local' ? (
+                      <ProductImage productId={item.image.productId} />
+                    ) : (
+                      <OnlineImage src={item.image.src ?? null} alt={item.name} />
+                    )}
                   </div>
 
-                  <StarRating productId={item.id} brand={item.brand} productName={item.name} />
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-1 text-sm font-medium text-neutral-500 light:text-neutral-400">{item.brand}</div>
+                    <h5 className="mb-3 line-clamp-2 text-lg font-bold text-neutral-900 light:text-neutral-100">{item.name}</h5>
 
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-gradient-to-r from-emerald-100 to-teal-100 px-3 py-1 text-sm font-bold text-emerald-700 light:from-emerald-900/40 light:to-teal-900/40 light:text-emerald-200">
+                        {item.price}
+                      </span>
+                      <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-700 light:bg-neutral-700 light:text-neutral-200">
+                        {item.tag}
+                      </span>
+                      {item.kind === 'online' && (
+                        <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-700 light:bg-blue-900/30 light:text-blue-200">
+                          Online Store
+                        </span>
+                      )}
+                    </div>
+
+                    <StarRating productId={item.id} brand={item.brand} productName={item.name} />
+
                     <a
                       href={item.link}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-200 px-3 py-2 text-sm font-medium text-emerald-800 transition hover:bg-emerald-50 dark:border-emerald-800/40 dark:text-emerald-100 dark:hover:bg-emerald-900/30 sm:w-auto"
+                      className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl border-2 border-emerald-500 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 transition-all hover:bg-emerald-100 hover:shadow-md light:border-emerald-700/40 light:bg-emerald-900/20 light:text-emerald-200 light:hover:bg-emerald-900/40"
                     >
-                      Lihat Produk
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="text-emerald-700 dark:text-emerald-200">
-                        <path d="M7 17L17 7M17 7H9M17 7V15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      Lihat Detail Produk
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
                       </svg>
                     </a>
                   </div>
                 </div>
               </div>
-            )
-          })}
+            ))}
+          </div>
         </div>
       </div>
     )
@@ -832,13 +904,12 @@ export default function PredictPage() {
 
   async function startCamera() {
     if (!videoRef.current) return
-    // Feature detection and secure context requirement
     if (typeof navigator === "undefined" || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setResult('<div class="alert alert-danger">Browser tidak mendukung camera API.</div>')
+      setResult('<div class="text-red-600">Browser tidak mendukung camera API.</div>')
       return
     }
     if (window.isSecureContext === false) {
-      setResult('<div class="alert alert-warning">Kamera memerlukan konteks aman (HTTPS atau http://localhost). Pastikan aplikasi berjalan di http://localhost atau gunakan HTTPS.</div>')
+      setResult('<div class="text-amber-600">Kamera memerlukan konteks aman (HTTPS atau http://localhost).</div>')
     }
     try {
       const constraints: MediaStreamConstraints = {
@@ -858,9 +929,8 @@ export default function PredictPage() {
       setFaceDetected(null)
       setLastFaceDetected(null)
       setPredictedTag(null)
-      setResult('<div class="text-blue-600 animate-pulse">🔍 Memulai deteksi wajah...</div>')
+      setResult('')
       
-      // Start continuous face detection
       startContinuousDetection(videoRef.current, (hasFace: boolean) => {
         setFaceDetected(hasFace)
       })
@@ -870,18 +940,17 @@ export default function PredictPage() {
       const msg = typeof err?.message === 'string' ? err.message : String(e)
       let hint = ""
       if (name === "NotAllowedError") {
-        hint = "Izin kamera ditolak. Buka pengaturan site pada browser dan izinkan kamera."
+        hint = " Izin kamera ditolak. Buka pengaturan browser dan izinkan kamera."
       } else if (name === "NotFoundError") {
-        hint = "Perangkat kamera tidak ditemukan. Pastikan kamera terhubung dan tidak dipakai aplikasi lain."
+        hint = " Perangkat kamera tidak ditemukan."
       } else if (name === "NotReadableError") {
-        hint = "Kamera sedang dipakai aplikasi lain. Tutup aplikasi kamera lain dan coba lagi."
+        hint = " Kamera sedang dipakai aplikasi lain."
       }
-      setResult(`<div class="alert alert-danger">Tidak bisa mengakses kamera: ${msg}${hint ? "<br>" + hint : ""}</div>`)
+      setResult(`<div class="text-red-600">Tidak bisa mengakses kamera: ${msg}${hint}</div>`)
     }
   }
 
   function stopCamera(options?: { keepResult?: boolean }) {
-    // Stop face detection
     stopContinuousDetection()
     setCameraActive(false)
     
@@ -923,7 +992,6 @@ export default function PredictPage() {
       sy = (vh - sh) / 2
     }
 
-    // Capture a higher-res square crop for a sharper preview
     const captureSize = Math.min(Math.max(1, Math.floor(Math.min(sw, sh))), CAPTURE_MAX_SIZE)
     canvasRef.current.width = captureSize
     canvasRef.current.height = captureSize
@@ -939,159 +1007,299 @@ export default function PredictPage() {
         : canvasRef.current.toDataURL(CAPTURE_MIME)
     setPreviewSrc(dataUrl)
     
-    // Stop camera after capture
     stopCamera({ keepResult: true })
 
-    setResult('<div class="text-emerald-600">✅ Foto berhasil diambil! Silakan klik Prediksi.</div>')
+    setResult('')
   }
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
-      <h2 className="mb-6 text-center text-2xl font-bold">Prediksi Penyakit Kulit Wajah</h2>
-      <div className="space-y-4">
-        <input type="file" accept="image/*" className="w-full rounded border border-neutral-300 px-3 py-2 focus:border-emerald-600 focus:outline-none" onChange={onFileChange} />
-        <div className="flex flex-wrap items-center justify-center gap-3">
-          <button className="w-full rounded border border-neutral-300 px-4 py-2 text-neutral-700 hover:bg-neutral-100 sm:w-auto" onClick={startCamera}>Buka Kamera</button>
-          <button 
-            className={`w-full rounded border px-4 py-2 sm:w-auto ${
-              !cameraActive
-                ? "border-neutral-300 text-neutral-400 cursor-not-allowed"
-                : faceDetected
-                  ? "border-emerald-600 text-emerald-700 hover:bg-emerald-50"
-                  : "border-amber-500 text-amber-700 hover:bg-amber-50"
-            }`} 
-            onClick={captureFrame}
-            disabled={!cameraActive}
-          >
-            Ambil Foto
-          </button>
-          <button className="w-full rounded border border-red-600 px-4 py-2 text-red-700 hover:bg-red-50 sm:w-auto" onClick={() => stopCamera()}>Matikan Kamera</button>
+    <main className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 px-4 py-12">
+      <style jsx global>{`
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+        
+        body {
+          font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+        }
+        
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+            transform: translateY(10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        
+        @keyframes slideUp {
+          from {
+            opacity: 0;
+            transform: translateY(20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        
+        @keyframes pulse {
+          0%, 100% {
+            opacity: 1;
+          }
+          50% {
+            opacity: 0.5;
+          }
+        }
+        
+        .animate-fadeIn {
+          animation: fadeIn 0.5s ease-out;
+        }
+        
+        .animate-slideUp {
+          animation: slideUp 0.4s ease-out;
+        }
+        
+        .animate-pulse {
+          animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+      `}</style>
+
+      <div className="mx-auto max-w-4xl">
+        {/* Header */}
+        <div className="mb-12 text-center">
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 shadow-lg dark:bg-neutral-800">
+            <div className="h-2 w-2 animate-pulse rounded-full bg-emerald-500"></div>
+            <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">AI Powered Analysis</span>
+          </div>
+          <h2 className="mb-4 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 bg-clip-text text-5xl font-extrabold text-transparent">
+            Deteksi Kondisi Kulit
+          </h2>
+          <p className="mx-auto max-w-2xl text-lg text-neutral-600 light:text-neutral-400">
+            Upload foto wajah Anda atau gunakan kamera untuk analisis kondisi kulit dengan teknologi AI yang akurat
+          </p>
         </div>
 
-        {/* Non-blocking warning (only before prediction result) */}
-        {lastFaceDetected === false && !predictedTag && (
-          <div
-            className="mx-auto max-w-md rounded-lg border border-amber-200 bg-amber-50 p-3 text-center text-sm text-amber-800"
-            title={FACE_NOT_DETECTED_SHORT}
-          >
-            {FACE_NOT_DETECTED_SHORT}
-          </div>
-        )}
-        
-        {/* Face Detection Status Indicator */}
-        {cameraActive && (
-          <div className={`mx-auto max-w-md rounded-lg border p-3 text-center text-sm ${
-            faceDetected === null 
-              ? "border-blue-200 bg-blue-50 text-blue-700"
-              : faceDetected 
-                ? "border-emerald-200 bg-emerald-50 text-emerald-700" 
-                : "border-amber-200 bg-amber-50 text-amber-700"
-          }`}>
-            <div className="flex items-center justify-center gap-2">
-              {faceDetected === null ? (
-                <>
-                  <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500" />
-                  <span>Memuat face detection...</span>
-                </>
-              ) : faceDetected ? (
-                <>
-                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none">
-                    <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/>
-                  </svg>
-                  <span>Wajah terdeteksi ({faceCount} wajah) - Siap mengambil foto!</span>
-                </>
-              ) : (
-                <>
-                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none">
-                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/>
-                    <path d="M15 9l-6 6M9 9l6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                  </svg>
-                </>
-              )}
+        {/* Main Card */}
+        <div className="overflow-hidden rounded-3xl bg-white shadow-2xl light:bg-neutral-900">
+          {/* Upload Section */}
+          <div className="border-b border-neutral-200 bg-gradient-to-br from-white to-emerald-50/30 p-8 light:border-neutral-800 light:from-neutral-900 light:to-emerald-900/10">
+            <div className="mb-6">
+              <label className="mb-3 block text-sm font-semibold text-neutral-700 light:text-neutral-300">Upload Foto</label>
+              <input
+                type="file"
+                accept="image/*"
+                className="w-full cursor-pointer rounded-xl border-2 border-dashed border-emerald-300 bg-white px-4 py-3 text-sm transition-all hover:border-emerald-500 hover:bg-emerald-50/50 focus:border-emerald-600 focus:outline-none focus:ring-4 focus:ring-emerald-100 light:border-emerald-800/40 light:bg-neutral-800 light:hover:bg-emerald-900/20 light:focus:ring-emerald-900/30"
+                onChange={onFileChange}
+              />
             </div>
-          </div>
-        )}
 
-        {/* Video Container with Overlay */}
-        <div className="relative flex justify-center">
-          <video 
-            ref={videoRef} 
-            autoPlay 
-            playsInline 
-            className={`hidden max-w-[320px] rounded ${cameraActive ? "!block" : ""}`}
-            style={{ transform: "scaleX(-1)" }}
-          />
-          <canvas 
-            ref={overlayCanvasRef} 
-            className={`pointer-events-none absolute left-1/2 top-0 -translate-x-1/2 ${cameraActive ? "block" : "hidden"}`}
-            style={{ maxWidth: "320px", transform: "scaleX(-1)" }}
-          />
-        </div>
-        
-        <canvas ref={canvasRef} width={INPUT_SIZE} height={INPUT_SIZE} className="hidden" />
-        <div className="flex justify-center">
-          {previewSrc ? (
-            <Image
-              id="preview"
-              src={previewSrc}
-              alt="Preview"
-              width={320}
-              height={320}
-              unoptimized
-              className="max-w-[320px] rounded border border-neutral-200"
-              style={{ height: "auto" }}
-            />
-          ) : null}
-        </div>
-        <div className="flex justify-center">
-          <button
-            className="w-full rounded bg-emerald-600 px-5 py-2.5 text-white hover:bg-emerald-700 disabled:opacity-50 sm:w-auto"
-            onClick={runPredict}
-            disabled={!sessionReady || !previewSrc}
-          >
-            Prediksi
-          </button>
-        </div>
-        {sessionReady ? (
-          resultHtml ? (
-            <div className="result text-neutral-700" dangerouslySetInnerHTML={{ __html: resultHtml }} />
-          ) : (
-            <div className="mx-auto max-w-md">
-              <div className="rounded-lg border border-emerald-200 bg-white p-4 text-sm text-neutral-800 shadow-sm">
-                <div className="flex items-center gap-2">
-                  <svg className="h-5 w-5 text-emerald-600" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M12 2a10 10 0 100 20 10 10 0 000-20z" stroke="currentColor" strokeWidth="1.5" />
-                    <path d="M8 12l2.5 2.5L16 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  <span className="font-medium">Model berhasil dimuat</span>
-                </div>
-                <p className="mt-2 text-neutral-700">Unggah gambar atau gunakan kamera, lalu tekan <span className="font-semibold">Prediksi</span> untuk mulai.</p>
-                <div className="mt-3 flex items-center gap-2">
-                  </div>
-              </div>
-            </div>
-          )
-        ) : (
-          <div className="mx-auto max-w-md">
-            <div className="animate-pulse rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 shadow-sm">
-              <div className="flex items-center gap-2">
-                <svg className="h-5 w-5 text-emerald-600" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5" />
-                  <path d="M12 6v6l4 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            {/* Camera Controls */}
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <button
+                className="group flex items-center gap-2 rounded-xl border-2 border-emerald-500 bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-3 font-semibold text-white shadow-lg transition-all hover:scale-105 hover:shadow-xl active:scale-95"
+                onClick={startCamera}
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
-                <span className="font-medium">Memuat model ONNX…</span>
+                Buka Kamera
+              </button>
+              
+              <button
+                className={`flex items-center gap-2 rounded-xl px-6 py-3 font-semibold shadow-lg transition-all hover:scale-105 active:scale-95 ${
+                  !cameraActive
+                    ? "cursor-not-allowed border-2 border-neutral-300 bg-neutral-100 text-neutral-400 dark:border-neutral-700 dark:bg-neutral-800"
+                    : faceDetected
+                      ? "border-2 border-emerald-500 bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200"
+                      : "border-2 border-amber-500 bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-200"
+                }`}
+                onClick={captureFrame}
+                disabled={!cameraActive}
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                Ambil Foto
+              </button>
+              
+              <button
+                className="flex items-center gap-2 rounded-xl border-2 border-red-500 bg-red-50 px-6 py-3 font-semibold text-red-700 shadow-lg transition-all hover:scale-105 hover:bg-red-100 active:scale-95 light:bg-red-900/20 light:text-red-300 light:hover:bg-red-900/40"
+                onClick={() => stopCamera()}
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                Matikan Kamera
+              </button>
+            </div>
+
+            {/* Face Detection Warning */}
+            {lastFaceDetected === false && !predictedTag && (
+              <div className="mt-6 rounded-2xl border-2 border-amber-200 bg-amber-50 p-4 text-center light:border-amber-800/40 light:bg-amber-900/20">
+                <div className="mb-2 inline-flex rounded-full bg-amber-100 p-2 light:bg-amber-900/40">
+                  <svg className="h-6 w-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <p className="font-semibold text-amber-800 light:text-amber-200">{FACE_NOT_DETECTED_SHORT}</p>
               </div>
-              <p className="mt-2 text-emerald-700">Menyiapkan sesi inferensi agar prediksi lebih cepat saat Anda mulai.</p>
-              <div className="mt-3 h-2 w-full rounded bg-emerald-100">
-                <div className="h-2 w-1/2 rounded bg-emerald-400"></div>
+            )}
+
+            {/* Face Detection Status */}
+            {cameraActive && (
+              <div className={`mt-6 rounded-2xl border-2 p-4 text-center transition-all ${
+                faceDetected === null
+                  ? "border-blue-200 bg-blue-50 light:border-blue-800/40 light:bg-blue-900/20"
+                  : faceDetected
+                    ? "border-emerald-200 bg-emerald-50 light:border-emerald-800/40 light:bg-emerald-900/20"
+                    : "border-amber-200 bg-amber-50 light:border-amber-800/40 light:bg-amber-900/20"
+              }`}>
+                <div className="flex items-center justify-center gap-3">
+                  {faceDetected === null ? (
+                    <>
+                      <div className="h-2 w-2 animate-pulse rounded-full bg-blue-500"></div>
+                      <span className="font-semibold text-blue-700 light:text-blue-300">Memuat face detection...</span>
+                    </>
+                  ) : faceDetected ? (
+                    <>
+                      <svg className="h-6 w-6 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span className="font-semibold text-emerald-700 light:text-emerald-300">
+                        ✨ Wajah terdeteksi ({faceCount} wajah) - Siap mengambil foto!
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <svg className="h-6 w-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <span className="font-semibold text-amber-700 light:text-amber-300">Posisikan wajah Anda di tengah kamera</span>
+                    </>
+                  )}
+                </div>
               </div>
+            )}
+
+            {/* Video Container */}
+            <div className="relative mt-6 flex justify-center">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                className={`hidden max-w-md rounded-2xl shadow-2xl ${cameraActive ? "!block" : ""}`}
+                style={{ transform: "scaleX(-1)" }}
+              />
+              <canvas
+                ref={overlayCanvasRef}
+                className={`pointer-events-none absolute left-1/2 top-0 -translate-x-1/2 ${cameraActive ? "block" : "hidden"}`}
+                style={{ maxWidth: "448px", transform: "scaleX(-1)" }}
+              />
+            </div>
+
+            <canvas ref={canvasRef} width={INPUT_SIZE} height={INPUT_SIZE} className="hidden" />
+
+            {/* Preview Image */}
+            {previewSrc && (
+              <div className="mt-6 flex justify-center">
+                <div className="relative overflow-hidden rounded-2xl shadow-2xl ring-4 ring-emerald-100 light:ring-emerald-900/30">
+                  <Image
+                    src={previewSrc}
+                    alt="Preview"
+                    width={400}
+                    height={400}
+                    unoptimized
+                    className="max-w-md"
+                    style={{ height: "auto" }}
+                  />
+                  {lastFaceDetected && !predictedTag && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/10">
+                      <div className="rounded-2xl bg-emerald-500/90 px-4 py-2 text-sm font-semibold text-white shadow-lg backdrop-blur-sm">
+                        ✓ Wajah Terdeteksi
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Predict Button */}
+            <div className="mt-6 flex justify-center">
+              <button
+                className="group relative overflow-hidden rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 px-10 py-4 text-lg font-bold text-white shadow-2xl transition-all hover:scale-105 hover:shadow-emerald-500/50 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
+                onClick={runPredict}
+                disabled={!sessionReady || !previewSrc || isAnalyzing}
+              >
+                <span className="relative z-10 flex items-center gap-3">
+                  {isAnalyzing ? (
+                    <>
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+                      Menganalisis...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                      </svg>
+                      Prediksi Sekarang
+                    </>
+                  )}
+                </span>
+                <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/30 to-transparent transition-transform duration-700 group-hover:translate-x-full"></div>
+              </button>
             </div>
           </div>
-        )}
-        {predictedTag ? <Recommendations tag={predictedTag} /> : null}
+
+          {/* Status Messages */}
+          <div className="p-8">
+            {sessionReady ? (
+              resultHtml ? (
+                <div className="result animate-fadeIn" dangerouslySetInnerHTML={{ __html: resultHtml }} />
+              ) : !predictedTag ? (
+                <div className="rounded-2xl border-2 border-emerald-200 bg-gradient-to-br from-emerald-50 to-teal-50 p-6 light:border-emerald-800/40 light:from-emerald-900/20 light:to-teal-900/20">
+                  <div className="flex items-start gap-4">
+                    <div className="rounded-xl bg-emerald-100 p-3 light:bg-emerald-900/40">
+                      <svg className="h-6 w-6 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <h3 className="mb-2 text-lg font-bold text-emerald-900 light:text-emerald-100">Model Siap Digunakan</h3>
+                      <p className="text-emerald-700 light:text-emerald-300">
+                        Upload gambar atau gunakan kamera, lalu tekan <span className="font-bold">Prediksi Sekarang</span> untuk memulai analisis.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : null
+            ) : (
+              <div className="animate-pulse rounded-2xl border-2 border-blue-200 bg-blue-50 p-6 light:border-blue-800/40 light:bg-blue-900/20">
+                <div className="flex items-start gap-4">
+                  <div className="rounded-xl bg-blue-100 p-3 light:bg-blue-900/40">
+                    <svg className="h-6 w-6 animate-spin text-blue-600" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="mb-2 text-lg font-bold text-blue-900 light:text-blue-100">Memuat Model ONNX...</h3>
+                    <p className="text-blue-700 light:text-blue-300">Menyiapkan sesi inferensi untuk prediksi yang lebih cepat.</p>
+                    <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-blue-100 light:bg-blue-900/40">
+                      <div className="h-full w-2/3 rounded-full bg-blue-500 transition-all duration-500"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Recommendations */}
+        {predictedTag && <Recommendations tag={predictedTag} confidence={predictionConfidence} />}
       </div>
     </main>
   )
 }
-  
