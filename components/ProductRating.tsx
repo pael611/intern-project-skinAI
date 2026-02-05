@@ -39,6 +39,7 @@ export default function ProductRating({
   const [hoveredRating, setHoveredRating] = useState<number>(0)
   const [ratingStats, setRatingStats] = useState<RatingStats | null>(null)
   const [isLoadingStats, setIsLoadingStats] = useState(true)
+  const [hasRated, setHasRated] = useState(false)
 
   /**
    * Fetch rating stats - memoized untuk mencegah refetch
@@ -110,15 +111,26 @@ export default function ProductRating({
             brand: productBrand,
             tag: productTag,
             rating,
-            comment: comment || null,
           }),
           signal: AbortSignal.timeout(TIMEOUT.FETCH),
         })
 
         if (!response.ok) {
-          const error = await response.json()
-          throw new Error(error.error || 'Gagal mengirim rating')
+          const errorBody = await response.json().catch(() => null)
+          const messageFromApi = errorBody?.error as string | undefined
+
+          // Jika sudah pernah rating, tandai dan jangan lempar error generic
+          if (response.status === 409 && messageFromApi?.includes('sudah pernah')) {
+            setHasRated(true)
+            alert('Anda sudah pernah memberi rating untuk produk ini')
+            return
+          }
+
+          throw new Error(messageFromApi || 'Gagal mengirim rating')
         }
+
+        // Berhasil kirim rating pertama kali
+        setHasRated(true)
 
         // Callback jika provided
         if (onRatingSubmit) {
@@ -204,7 +216,7 @@ export default function ProductRating({
               onClick={() => setRating(star)}
               onMouseEnter={() => setHoveredRating(star)}
               onMouseLeave={() => setHoveredRating(0)}
-              disabled={disabled}
+              disabled={disabled || hasRated}
               className="transition-transform duration-150 hover:scale-125"
               title={`Rate ${star} stars`}
             >
@@ -222,7 +234,7 @@ export default function ProductRating({
         {rating > 0 && (
           <button
             type="submit"
-            disabled={disabled || isSubmitting}
+            disabled={disabled || isSubmitting || hasRated}
             className="w-full rounded-md bg-emerald-600 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:bg-neutral-400 disabled:cursor-not-allowed transition-colors duration-150"
           >
             {isSubmitting ? 'Mengirim...' : 'Kirim'}
@@ -290,7 +302,7 @@ export default function ProductRating({
                 onClick={() => setRating(star)}
                 onMouseEnter={() => setHoveredRating(star)}
                 onMouseLeave={() => setHoveredRating(0)}
-                disabled={disabled}
+                disabled={disabled || hasRated}
                 className="transition-transform duration-150 hover:scale-110"
               >
                 <span
@@ -328,7 +340,7 @@ export default function ProductRating({
 
         <button
           type="submit"
-          disabled={disabled || isSubmitting}
+          disabled={disabled || isSubmitting || hasRated}
           className="w-full rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700 disabled:bg-neutral-400 disabled:cursor-not-allowed transition-colors duration-150"
         >
           {isSubmitting ? 'Mengirim...' : 'Kirim Rating'}

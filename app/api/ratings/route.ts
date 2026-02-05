@@ -6,14 +6,15 @@ import { z } from 'zod'
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabasePublishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY
 
-// Validation schema dengan strict rules
+// Validation schema dengan coercion agar payload dari frontend lebih fleksibel
 const ratingSchema = z.object({
-  product_id: z.string().min(1).max(255),
+  // DB column: int, terima string/number lalu coercion ke number
+  product_id: z.coerce.number().int().positive(),
   product_name: z.string().max(255).optional(),
   brand: z.string().max(255).optional(),
   tag: z.string().max(100).optional(),
-  rating: z.number().int().min(1).max(5),
-  comment: z.string().max(200).optional(),
+  // Rating juga dicoerce ke number supaya aman jika terkirim sebagai string
+  rating: z.coerce.number().int().min(1).max(5),
 })
 
 type RatingInput = z.infer<typeof ratingSchema>
@@ -70,7 +71,31 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const { product_id, product_name, brand, tag, rating, comment } = parsed.data
+    const { product_id, product_name, brand, tag, rating } = parsed.data
+
+    // Cek apakah user sudah pernah memberi rating untuk produk ini
+    const { data: existingRating, error: existingError } = await supabaseServer
+      .from('product_ratings')
+      .select('id, rating')
+      .eq('user_id', user.id)
+      .eq('product_id', product_id)
+      .maybeSingle()
+
+    if (existingError && existingError.code !== 'PGRST116') {
+      // Error selain "no rows" dari PostgREST
+      console.error('Rating existing check error:', existingError)
+      return NextResponse.json({ error: existingError.message }, { status: 500 })
+    }
+
+    if (existingRating) {
+      return NextResponse.json(
+        {
+          error: 'Anda sudah pernah memberi rating untuk produk ini',
+          data: existingRating,
+        },
+        { status: 409 }
+      )
+    }
 
     // Insert rating ke database
     const { data, error } = await supabaseServer
@@ -78,11 +103,10 @@ export async function POST(req: NextRequest) {
       .insert({
         user_id: user.id,
         product_id,
-        product_name: product_name || null,
         brand: brand || null,
+        product_name: product_name || null,
         tag: tag || null,
         rating,
-        comment: comment || null,
       })
       .select()
 

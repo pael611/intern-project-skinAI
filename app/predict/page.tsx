@@ -23,16 +23,6 @@ async function savePrediction(payload: { label: string; confidence: number; sour
 
 }
 
-type TreatmentRow = {
-  Id: number | string
-  Label?: string
-  Brand: string
-  "Product Name": string
-  Price: string
-  Links: string
-  Tags: string
-}
-
 type OnlineProductRow = {
   id_product: number
   nama_product: string
@@ -79,7 +69,6 @@ const FACE_NOT_DETECTED_SHORT = "Wajah tidak terdeteksi sempurna. Tetap tenang, 
 export default function PredictPage() {
   const [sessionReady, setSessionReady] = useState(false)
   const [loadingMsg, setLoadingMsg] = useState<string>("Loading ONNX model…")
-  const [treatments, setTreatments] = useState<TreatmentRow[]>([])
   const [resultHtml, setResultHtml] = useState<string>("")
   const [predictedTag, setPredictedTag] = useState<string | null>(null)
   const [predictionConfidence, setPredictionConfidence] = useState<number>(0)
@@ -111,14 +100,6 @@ export default function PredictPage() {
     startContinuousDetection,
     stopContinuousDetection,
   } = useFaceDetection()
-
-  // Load treatments
-  useEffect(() => {
-    fetch("/skincare_product/treatment.json")
-      .then((r) => r.json())
-      .then((data) => setTreatments(data))
-      .catch(() => {})
-  }, [])
 
   // Load online products from Supabase via API
   useEffect(() => {
@@ -364,18 +345,122 @@ export default function PredictPage() {
     img.src = previewSrc
   }
 
-  function Recommendations({ tag, confidence }: { tag: string; confidence: number }) {
-    const imageCacheRef = useRef(new Map<string, string | null>())
+  function getSeverityInfo(tag: string) {
+    const key = tag.toLowerCase()
+
+    if (key.includes("normal")) {
+      return {
+        level: "Kulit Normal",
+        description:
+          "Kondisi kulit Anda tergolong seimbang. Tetap jaga dengan rutin membersihkan, melembapkan, dan menggunakan tabir surya.",
+        bgColor: "bg-emerald-100 text-emerald-800 light:bg-emerald-900/40",
+        color: "",
+      }
+    }
+
+    if (key.includes("acne")) {
+      return {
+        level: "Kulit Berjerawat",
+        description:
+          "Terlihat adanya kemunculan jerawat. Rutin gunakan produk non‑komedogenik dan hindari memencet jerawat untuk mencegah bekas.",
+        bgColor: "bg-red-100 text-red-800 light:bg-red-900/40",
+        color: "",
+      }
+    }
+
+    if (key.includes("black")) {
+      return {
+        level: "Komedo / Blackheads",
+        description:
+          "Terdapat komedo pada area tertentu. Gunakan pembersih yang lembut dan produk dengan kandungan eksfoliasi ringan.",
+        bgColor: "bg-amber-100 text-amber-800 light:bg-amber-900/40",
+        color: "",
+      }
+    }
+
+    if (key.includes("oily")) {
+      return {
+        level: "Kulit Berminyak",
+        description:
+          "Produksi minyak berlebih terdeteksi. Pilih pelembap ringan dan produk yang mengontrol sebum tanpa membuat kulit kering.",
+        bgColor: "bg-yellow-100 text-yellow-800 light:bg-yellow-900/40",
+        color: "",
+      }
+    }
+
+    if (key.includes("wrinkle")) {
+      return {
+        level: "Garis Halus / Kerutan",
+        description:
+          "Mulai tampak garis halus atau kerutan. Pertimbangkan produk dengan antioksidan dan gunakan tabir surya setiap hari.",
+        bgColor: "bg-purple-100 text-purple-800 light:bg-purple-900/40",
+        color: "",
+      }
+    }
+
+    if (key.includes("spot")) {
+      return {
+        level: "Noda / Light Spots",
+        description:
+          "Terdapat area dengan warna kulit tidak merata. Gunakan perlindungan matahari dan perawatan pencerah yang lembut.",
+        bgColor: "bg-sky-100 text-sky-800 light:bg-sky-900/40",
+        color: "",
+      }
+    }
+
+    return {
+      level: "Kondisi Kulit",
+      description:
+        "Sistem mendeteksi kondisi kulit spesifik. Ikuti rekomendasi produk di bawah sebagai langkah perawatan awal.",
+      bgColor: "bg-neutral-100 text-neutral-800 light:bg-neutral-800",
+      color: "",
+    }
+  }
+
+  function PredictionResult({ tag, confidence }: { tag: string; confidence: number }) {
+    const severityInfo = getSeverityInfo(tag)
+
+    return (
+      <div className="mb-8 overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 p-8 shadow-2xl">
+        <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
+          <div className="flex-1">
+            <p className="mb-2 text-sm font-medium text-white/80">Hasil Diagnosa</p>
+            <h3 className="mb-3 text-4xl font-bold text-white">{tag}</h3>
+            <p className="mb-4 text-white/90">{severityInfo.description}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`rounded-full px-4 py-1.5 text-sm font-semibold ${severityInfo.bgColor} ${severityInfo.color}`}>
+                {severityInfo.level}
+              </span>
+            </div>
+          </div>
+          <div className="rounded-2xl bg-white/20 backdrop-blur-md p-6 text-center">
+            <p className="mb-1 text-sm font-medium text-white/80">Confidence</p>
+            <p className="text-5xl font-bold text-white">{(confidence * 100).toFixed(0)}%</p>
+            <div className="mt-3 h-2 w-32 overflow-hidden rounded-full bg-white/30">
+              <div 
+                className="h-full rounded-full bg-white shadow-lg transition-all duration-1000"
+                style={{ width: `${confidence * 100}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  function Recommendations({ tag }: { tag: string }) {
     const [ratings, setRatings] = useState<Record<string, number>>({})
     const [ratingsLoaded, setRatingsLoaded] = useState(false)
     const [ratingError, setRatingError] = useState<string | null>(null)
 
-    const produkLocal = treatments.filter((row) => row.Tags?.toLowerCase() === tag.toLowerCase())
-    const produkOnline = onlineProducts.filter((p) => String(p.label || '').toLowerCase() === tag.toLowerCase())
+    const produkOnline = onlineProducts.filter(
+      (p) => String(p.label || "").toLowerCase() === tag.toLowerCase()
+    )
 
     const productIds = Array.from(
       new Set(
-        [...produkLocal.map((row) => String(row.Id ?? '').trim()), ...produkOnline.map((p) => String(p.id_product ?? '').trim())]
+        produkOnline
+          .map((p) => String(p.id_product ?? "").trim())
           .filter(Boolean)
       )
     ).slice(0, 200)
@@ -384,6 +469,7 @@ export default function PredictPage() {
 
     useEffect(() => {
       let cancelled = false
+
       async function loadRatings() {
         setRatingsLoaded(false)
         setRatingError(null)
@@ -397,7 +483,9 @@ export default function PredictPage() {
           }
 
           const qs = encodeURIComponent(productIdsKey)
-          const res = await fetch(`/api/predictions/rate?productIds=${qs}`, { cache: "no-store" })
+          const res = await fetch(`/api/predictions/rate?productIds=${qs}`, {
+            cache: "no-store",
+          })
 
           if (res.status === 401) {
             if (!cancelled) {
@@ -407,7 +495,10 @@ export default function PredictPage() {
             return
           }
 
-          const json = (await res.json().catch(() => null)) as { ok?: boolean; ratings?: Record<string, number>; error?: string } | null
+          const json = (await res.json().catch(() => null)) as
+            | { ok?: boolean; ratings?: Record<string, number>; error?: string }
+            | null
+
           if (!res.ok) {
             const msg = json?.error || `Failed to load ratings (${res.status})`
             throw new Error(msg)
@@ -433,30 +524,17 @@ export default function PredictPage() {
       }
     }, [tag, productIdsKey])
 
-    const items = [
-      ...produkLocal.map((row, idx) => ({
-        kind: 'local' as const,
-        idx,
-        id: String(row.Id),
-        brand: row.Brand,
-        name: row['Product Name'],
-        price: row.Price,
-        link: row.Links,
-        tag,
-        image: { type: 'local' as const, productId: row.Id },
-      })),
-      ...produkOnline.map((p, idx) => ({
-        kind: 'online' as const,
-        idx: produkLocal.length + idx,
-        id: String(p.id_product),
-        brand: p.brand,
-        name: p.nama_product,
-        price: p.harga,
-        link: p.link,
-        tag: p.label || tag,
-        image: { type: 'url' as const, src: p.gambar },
-      })),
-    ]
+    const items = produkOnline.map((p, idx) => ({
+      kind: "online" as const,
+      idx,
+      id: String(p.id_product),
+      brand: p.brand,
+      name: p.nama_product,
+      price: p.harga,
+      link: p.link,
+      tag: p.label || tag,
+      image: { type: "url" as const, src: p.gambar },
+    }))
 
     const itemsSorted = items
       .slice()
@@ -467,124 +545,13 @@ export default function PredictPage() {
         return a.idx - b.idx
       })
 
-    if (itemsSorted.length === 0) {
-      return (
-        <div className="mt-8 rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center text-amber-800 light:border-amber-400/30 light:bg-neutral-900 light:text-amber-300">
-          <svg className="mx-auto mb-3 h-12 w-12 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
-          </svg>
-          <p className="font-semibold">Tidak ada rekomendasi produk untuk kategori ini.</p>
-        </div>
-      )
-    }
-
-    function ProductImage({ productId }: { productId: string | number }) {
-      const pid = String(productId ?? "")
-      const [src, setSrc] = useState<string | null>(() => imageCacheRef.current.get(pid) ?? null)
-      const [missing, setMissing] = useState<boolean>(() => imageCacheRef.current.get(pid) === null)
-
-      useEffect(() => {
-        let cancelled = false
-        const cached = imageCacheRef.current.get(pid)
-        if (cached !== undefined) {
-          setSrc(cached)
-          setMissing(cached === null)
-          return
-        }
-
-        async function resolve() {
-          if (!pid) {
-            imageCacheRef.current.set(pid, null)
-            if (!cancelled) {
-              setSrc(null)
-              setMissing(true)
-            }
-            return
-          }
-
-          const exts = ["png", "jpg"]
-          for (const ext of exts) {
-            const url = `/skincare_product/gambar_produk/${pid}.${ext}`
-            try {
-              const head = await fetch(url, { method: "HEAD", cache: "force-cache" })
-              if (head.ok) {
-                imageCacheRef.current.set(pid, url)
-                if (!cancelled) {
-                  setSrc(url)
-                  setMissing(false)
-                }
-                return
-              }
-
-              if (head.status === 405 || head.status === 501) {
-                const get = await fetch(url, { method: "GET", cache: "force-cache" })
-                if (get.ok) {
-                  imageCacheRef.current.set(pid, url)
-                  if (!cancelled) {
-                    setSrc(url)
-                    setMissing(false)
-                  }
-                  return
-                }
-              }
-            } catch {
-              // ignore and try next extension
-            }
-          }
-
-          imageCacheRef.current.set(pid, null)
-          if (!cancelled) {
-            setSrc(null)
-            setMissing(true)
-          }
-        }
-
-        void resolve()
-        return () => {
-          cancelled = true
-        }
-      }, [pid])
-
-      if (missing) {
-        return (
-          <div className="flex h-28 w-28 items-center justify-center rounded-2xl from-neutral-100 to-neutral-200 text-center text-xs leading-tight text-neutral-500 ring-2 ring-emerald-100/50 light:from-neutral-800 light:to-neutral-900 light:text-neutral-400 light:ring-emerald-700/30">
-            <svg className="h-10 w-10 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-          </div>
-        )
-      }
-
-      if (!src) {
-        return (
-          <div className="h-28 w-28 animate-pulse rounded-2xl bg-gradient-to-br from-neutral-200 to-neutral-300 ring-2 ring-emerald-100/50 light:from-neutral-800 light:to-neutral-900 light:ring-emerald-700/30" />
-        )
-      }
-
-      return (
-        <div className="h-28 w-28 overflow-hidden rounded-2xl ring-2 ring-emerald-100/50 transition-all duration-300 group-hover:ring-emerald-300 group-hover:shadow-lg light:ring-emerald-700/30">
-          <Image
-            src={src}
-            alt="produk"
-            width={112}
-            height={112}
-            sizes="112px"
-            className="h-28 w-28 object-cover transition-transform duration-300 ease-out hover:scale-125"
-            onError={() => {
-              imageCacheRef.current.set(pid, null)
-              setMissing(true)
-            }}
-          />
-        </div>
-      )
-    }
-
     function OnlineImage({ src, alt }: { src: string | null; alt: string }) {
       if (!src) {
         return (
           <div className="h-28 w-28 rounded-2xl bg-gradient-to-br from-neutral-200 to-neutral-300 ring-2 ring-emerald-100/50 light:from-neutral-800 light:to-neutral-900 light:ring-emerald-700/30" />
         )
       }
+
       return (
         <div className="h-28 w-28 overflow-hidden rounded-2xl ring-2 ring-emerald-100/50 transition-all duration-300 group-hover:ring-emerald-300 group-hover:shadow-lg light:ring-emerald-700/30">
           <Image
@@ -600,77 +567,66 @@ export default function PredictPage() {
       )
     }
 
-    // Get severity level based on tag
-    const getSeverityInfo = (tag: string) => {
-      const severityMap: Record<string, { level: string; color: string; bgColor: string; description: string }> = {
-        "Acne": { level: "Moderate", color: "text-orange-700", bgColor: "bg-orange-100 light:bg-orange-900/30", description: "Perlu perawatan rutin" },
-        "Blackheads": { level: "Mild", color: "text-yellow-700", bgColor: "bg-yellow-100 light:bg-yellow-900/30", description: "Dapat diatasi dengan pembersihan" },
-        "light Spots": { level: "Moderate", color: "text-amber-700", bgColor: "bg-amber-100 light:bg-amber-900/30", description: "Gunakan produk pencerah" },
-        "Normal Skin": { level: "Healthy", color: "text-emerald-700", bgColor: "bg-emerald-100 light:bg-emerald-900/30", description: "Kulit dalam kondisi baik" },
-        "Oily Skin": { level: "Mild", color: "text-blue-700", bgColor: "bg-blue-100 light:bg-blue-900/30", description: "Kontrol minyak berlebih" },
-        "Wrinkles": { level: "Moderate", color: "text-purple-700", bgColor: "bg-purple-100 light:bg-purple-900/30", description: "Anti-aging diperlukan" },
-      }
-      return severityMap[tag] || { level: "Unknown", color: "text-neutral-700", bgColor: "bg-neutral-100", description: "" }
-    }
-
-    const severityInfo = getSeverityInfo(tag)
-
     return (
-      <div className="mt-12 animate-fadeIn">
-        {/* Result Card */}
-        <div className="mb-8 overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 p-8 shadow-2xl">
-          <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
-            <div className="flex-1">
-              <p className="mb-2 text-sm font-medium text-white/80">Hasil Diagnosa</p>
-              <h3 className="mb-3 text-4xl font-bold text-white">{tag}</h3>
-              <p className="mb-4 text-white/90">{severityInfo.description}</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className={`rounded-full px-4 py-1.5 text-sm font-semibold ${severityInfo.bgColor} ${severityInfo.color}`}>
-                  {severityInfo.level}
-                </span>
-              </div>
-            </div>
-            <div className="rounded-2xl bg-white/20 backdrop-blur-md p-6 text-center">
-              <p className="mb-1 text-sm font-medium text-white/80">Confidence</p>
-              <p className="text-5xl font-bold text-white">{(confidence * 100).toFixed(0)}%</p>
-              <div className="mt-3 h-2 w-32 overflow-hidden rounded-full bg-white/30">
-                <div 
-                  className="h-full rounded-full bg-white shadow-lg transition-all duration-1000"
-                  style={{ width: `${confidence * 100}%` }}
-                />
-              </div>
-            </div>
-          </div>
+      <div className="mt-8 rounded-3xl bg-white p-8 shadow-xl light:bg-neutral-900">
+        <div className="mb-6 flex items-center gap-3">
+          <svg
+            className="h-8 w-8 text-emerald-600"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"
+            />
+          </svg>
+          <h4 className="text-3xl font-bold text-neutral-900 light:text-neutral-100">
+            Rekomendasi Produk
+          </h4>
         </div>
 
-        {/* Recommendations Section */}
-        <div className="rounded-3xl bg-white p-8 shadow-xl light:bg-neutral-900">
-          <div className="mb-6 flex items-center gap-3">
-            <svg className="h-8 w-8 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-            </svg>
-            <h4 className="text-3xl font-bold text-neutral-900 light:text-neutral-100">Rekomendasi Produk</h4>
+        {!ratingsLoaded && (
+          <div className="mb-6 flex items-center gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-700 light:border-emerald-800/40 light:bg-emerald-900/20 light:text-emerald-200">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent" />
+            Memuat preferensi urutan berdasarkan rating…
           </div>
-          
-          {!ratingsLoaded && (
-            <div className="mb-6 flex items-center gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-700 light:border-emerald-800/40 light:bg-emerald-900/20 light:text-emerald-200">
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent"></div>
-              Memuat preferensi urutan berdasarkan rating…
-            </div>
-          )}
-          
-          {ratingError && (
-            <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 light:border-red-800/40 light:bg-red-900/20 light:text-red-200">
-              {ratingError}
-            </div>
-          )}
-          
-          {onlineProductsError && (
-            <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 light:border-amber-800/40 light:bg-amber-900/20 light:text-amber-200">
-              Gagal memuat produk online: {onlineProductsError}
-            </div>
-          )}
-          
+        )}
+
+        {ratingError && (
+          <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 light:border-red-800/40 light:bg-red-900/20 light:text-red-200">
+            {ratingError}
+          </div>
+        )}
+
+        {onlineProductsError && (
+          <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 light:border-amber-800/40 light:bg-amber-900/20 light:text-amber-200">
+            Gagal memuat produk online: {onlineProductsError}
+          </div>
+        )}
+
+        {itemsSorted.length === 0 ? (
+          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center text-amber-800 light:border-amber-400/30 light:bg-neutral-900 light:text-amber-300">
+            <svg
+              className="mx-auto mb-3 h-12 w-12 text-amber-500"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
+              />
+            </svg>
+            <p className="font-semibold">
+              Tidak ada rekomendasi produk untuk kategori ini.
+            </p>
+          </div>
+        ) : (
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             {itemsSorted.map((item, index) => (
               <div
@@ -680,16 +636,16 @@ export default function PredictPage() {
               >
                 <div className="flex flex-col gap-4 sm:flex-row">
                   <div className="shrink-0">
-                    {item.image.type === 'local' ? (
-                      <ProductImage productId={item.image.productId} />
-                    ) : (
-                      <OnlineImage src={item.image.src ?? null} alt={item.name} />
-                    )}
+                    <OnlineImage src={item.image.src ?? null} alt={item.name} />
                   </div>
 
                   <div className="min-w-0 flex-1">
-                    <div className="mb-1 text-sm font-medium text-neutral-500 light:text-neutral-400">{item.brand}</div>
-                    <h5 className="mb-3 line-clamp-2 text-lg font-bold text-neutral-900 light:text-neutral-100">{item.name}</h5>
+                    <div className="mb-1 text-sm font-medium text-neutral-500 light:text-neutral-400">
+                      {item.brand}
+                    </div>
+                    <h5 className="mb-3 line-clamp-2 text-lg font-bold text-neutral-900 light:text-neutral-100">
+                      {item.name}
+                    </h5>
 
                     <div className="mb-3 flex flex-wrap items-center gap-2">
                       <span className="rounded-full bg-gradient-to-r from-emerald-100 to-teal-100 px-3 py-1 text-sm font-bold text-emerald-700 light:from-emerald-900/40 light:to-teal-900/40 light:text-emerald-200">
@@ -703,7 +659,7 @@ export default function PredictPage() {
                           ★ {ratings[item.id]}/5
                         </span>
                       )}
-                      {item.kind === 'online' && (
+                      {item.kind === "online" && (
                         <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-700 light:bg-blue-900/30 light:text-blue-200">
                           Online Store
                         </span>
@@ -711,7 +667,14 @@ export default function PredictPage() {
                     </div>
 
                     <div className="text-xs text-neutral-500 light:text-neutral-400">
-                      Atur rating produk di halaman <a className="text-emerald-700 underline light:text-emerald-300" href="/profile">Profil</a>.
+                      Atur rating produk di halaman
+                      <a
+                        className="ml-1 text-emerald-700 underline light:text-emerald-300"
+                        href="/profile"
+                      >
+                        Profil
+                      </a>
+                      .
                     </div>
 
                     <a
@@ -721,8 +684,18 @@ export default function PredictPage() {
                       className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl border-2 border-emerald-500 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 transition-all hover:bg-emerald-100 hover:shadow-md light:border-emerald-700/40 light:bg-emerald-900/20 light:text-emerald-200 light:hover:bg-emerald-900/40"
                     >
                       Lihat Detail Produk
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                      <svg
+                        className="h-4 w-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M14 5l7 7m0 0l-7 7m7-7H3"
+                        />
                       </svg>
                     </a>
                   </div>
@@ -730,7 +703,7 @@ export default function PredictPage() {
               </div>
             ))}
           </div>
-        </div>
+        )}
       </div>
     )
   }
@@ -1130,8 +1103,13 @@ export default function PredictPage() {
           </div>
         </div>
 
-        {/* Recommendations */}
-        {predictedTag && <Recommendations tag={predictedTag} confidence={predictionConfidence} />}
+        {/* Hasil Prediksi & Rekomendasi */}
+        {predictedTag && (
+          <div className="mt-12 animate-fadeIn">
+            <PredictionResult tag={predictedTag} confidence={predictionConfidence} />
+            <Recommendations tag={predictedTag} />
+          </div>
+        )}
       </div>
     </main>
   )
