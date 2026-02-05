@@ -253,56 +253,62 @@ const ProductMasterAdmin: React.FC = () => {
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white">
-              <h2 className="text-2xl font-bold text-slate-800">
+        // PERBAIKAN: Mengganti bg-black bg-opacity-50 menjadi transparan dengan blur
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm animate-in fade-in duration-300">
+          {/* PERBAIKAN: Menyesuaikan rounded agar lebih modern (rounded-[2.5rem]) dan shadow yang lebih dalam */}
+          <div className="bg-white rounded-[2.5rem] shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom-4 duration-300">
+            <div className="p-8 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white/80 backdrop-blur-md z-10">
+              <h2 className="text-2xl font-black text-slate-800">
                 {editingProduct ? 'Edit Produk' : 'Tambah Produk Baru'}
               </h2>
               <button
                 onClick={() => setShowModal(false)}
-                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400"
                 aria-label="Close modal"
               >
-                <X className="w-5 h-5" />
+                <X className="w-6 h-6" />
               </button>
             </div>
             
-            <div className="p-6 space-y-4">
-            
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Brand</label>
-                  <input
-                    type="text"
-                    value={formData.brand}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => 
-                      setFormData({...formData, brand: e.target.value})
-                    }
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-            
+            <div className="p-8 space-y-5">
+              {/* BRAND */}
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Nama Produk</label>
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-2 ml-1">Brand</label>
+                <input
+                  type="text"
+                  value={formData.brand}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => 
+                    setFormData({...formData, brand: e.target.value})
+                  }
+                  className="w-full px-5 py-3 border-2 border-slate-50 bg-slate-50 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white transition-all"
+                  placeholder="Nama Brand"
+                />
+              </div>
+            
+              {/* NAMA PRODUK */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-2 ml-1">Nama Produk</label>
                 <input
                   type="text"
                   value={formData.nama_product}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => 
                     setFormData({...formData, nama_product: e.target.value})
                   }
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-5 py-3 border-2 border-slate-50 bg-slate-50 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white transition-all"
+                  placeholder="Nama Lengkap Produk"
                 />
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {/* LABEL */}
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Label</label>
+                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-2 ml-1">Label</label>
                   <select
                     value={formData.label}
                     onChange={(e: React.ChangeEvent<HTMLSelectElement>) => 
                       setFormData({...formData, label: e.target.value})
                     }
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-5 py-3 border-2 border-slate-50 bg-slate-50 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white transition-all appearance-none"
                   >
                     <option value="">Pilih Label</option>
                     <option value="Acne">Acne</option>
@@ -314,59 +320,64 @@ const ProductMasterAdmin: React.FC = () => {
                   </select>
                 </div>
 
+                {/* HARGA */}
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Harga (IDR)</label>
+                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-2 ml-1">Harga (IDR)</label>
                   <input
                     type="number"
                     value={formData.harga}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => 
                       setFormData({...formData, harga: e.target.value})
                     }
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-5 py-3 border-2 border-slate-50 bg-slate-50 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white transition-all"
+                    placeholder="0"
                   />
                 </div>
               </div>
 
+              {/* URL GAMBAR */}
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">URL Gambar</label>
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-2 ml-1">URL Gambar</label>
                 <input
                   type="url"
                   value={formData.gambar}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => 
                     setFormData({...formData, gambar: e.target.value})
                   }
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-5 py-3 border-2 border-slate-50 bg-slate-50 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white transition-all"
                   placeholder="https://example.com/image.jpg"
                 />
               </div>
 
+              {/* LINK PRODUK */}
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Link Produk</label>
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-2 ml-1">Link Produk</label>
                 <input
                   type="url"
                   value={formData.link}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => 
                     setFormData({...formData, link: e.target.value})
                   }
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="https://example.com/product"
+                  className="w-full px-5 py-3 border-2 border-slate-50 bg-slate-50 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white transition-all"
+                  placeholder="https://shopee.co.id/..."
                 />
               </div>
 
-              <div className="flex gap-3 pt-4">
+              {/* ACTION BUTTONS */}
+              <div className="flex gap-4 pt-6">
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="flex-1 px-6 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors"
+                  className="flex-1 px-6 py-4 border-2 border-slate-100 text-slate-500 rounded-2xl font-bold hover:bg-slate-50 transition-all"
                 >
                   Batal
                 </button>
                 <button
                   type="button"
                   onClick={handleSubmit}
-                  className="flex-1 px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                  className="flex-1 px-6 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-2xl font-bold shadow-lg shadow-blue-100 transition-all active:scale-95"
                 >
-                  {editingProduct ? 'Update' : 'Simpan'}
+                  {editingProduct ? 'Update Produk' : 'Simpan Produk'}
                 </button>
               </div>
             </div>
