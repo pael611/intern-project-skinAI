@@ -4,14 +4,15 @@ import { cookies } from 'next/headers'
 
 export async function GET() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const supabasePublishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY
+  const supabasePublishableKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY
 
   const envOk = Boolean(supabaseUrl && supabasePublishableKey)
   if (!envOk) {
     return NextResponse.json({
       ok: false,
       envOk,
-      error: 'Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY',
+      error:
+        'Missing NEXT_PUBLIC_SUPABASE_URL or (NEXT_PUBLIC_SUPABASE_ANON_KEY / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY)',
     }, { status: 500 })
   }
 

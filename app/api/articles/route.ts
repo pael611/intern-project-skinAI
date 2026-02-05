@@ -3,13 +3,13 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
 import { z } from 'zod'
-import { requireEnv } from '@/lib/env.server'
+import { requireEnv, requireEnvAny } from '@/lib/env.server'
 
 export async function GET() {
   const cookieStore = cookies()
   const supabase = createServerClient(
     requireEnv('NEXT_PUBLIC_SUPABASE_URL'),
-    requireEnv('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY'),
+    requireEnvAny(['NEXT_PUBLIC_SUPABASE_ANON_KEY', 'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY']),
     {
       cookies: {
         getAll() {
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
   const cookieStore = cookies()
   const supabase = createServerClient(
     requireEnv('NEXT_PUBLIC_SUPABASE_URL'),
-    requireEnv('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY'),
+    requireEnvAny(['NEXT_PUBLIC_SUPABASE_ANON_KEY', 'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY']),
     {
       cookies: {
         getAll() {
