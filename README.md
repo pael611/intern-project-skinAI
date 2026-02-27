@@ -22,20 +22,48 @@
 
 ### Deskripsi Project
 
-**SkinAI2** adalah aplikasi web modern berbasis **Machine Learning dan AI** yang dirancang untuk menganalisis kondisi kesehatan kulit wajah pengguna secara real-time. Aplikasi ini menggunakan teknologi **ONNX Runtime** untuk menjalankan model machine learning di sisi client, memungkinkan prediksi instan tanpa ketergantungan server-side ML.
+**SkinAI2** adalah aplikasi web modern yang mengintegrasikan prinsip-prinsip **machine learning**, **computer vision**, dan **kecerdasan buatan** untuk menganalisis kondisi kesehatan kulit wajah secara real-time. Dalam konteks akademis, sistem ini memanfaatkan model klasifikasi citra terlatih (convolutional neural network) yang dibangun dari dataset dermatologis berlabel. Pendekatan ini mencerminkan metodologi penelitian ilmiah dalam visi komputer: ekstraksi fitur spasial melalui lapisan konvolusional, normalisasi, dan inferensi probabilistik pada output softmax.
+
+Model tersebut diekspor dalam format **ONNX** (Open Neural Network Exchange) untuk kompatibilitas lintas platform. Dengan mengadopsi **ONNX Runtime** di sisi klien (browser) dan server (Node.js), sistem dapat melakukan inferensi langsung tanpa memerlukan sumber daya komputasi server yang intensif. Ini mendukung arsitektur terdistribusi yang memfasilitasi skalabilitas dan privasi data, sesuai dengan praktik rekayasa perangkat lunak modern.
+
+Aplikasi dirancang sesuai dengan standar ilmiah untuk validasi dan reprodusibilitas: dataset dilabeli oleh ahli dermatologi, model dievaluasi menggunakan metrik seperti akurasi, presisi, recall, serta kurva ROC-AUC, dan kode sumber dikelola dengan prinsip rekayasa perangkat lunak yang baik (TypeScript, kontrol versi, dan pengujian otomatis).
+
+### Landasan Teori & Metodologi
+
+1. **Computer Vision & Convolutional Neural Networks (CNN)**
+   - CNN adalah arsitektur deep learning yang efektif untuk pemrosesan citra. Lapisan konvolusi digunakan untuk menangkap pola lokal (tepi, tekstur) sementara lapisan pooling mereduksi dimensi dan memperkuat invarian translasi.
+   - Model dalam SkinAI2 dilatih menggunakan backpropagation dengan fungsi kehilangan kategorikal cross-entropy, mengoptimalkan bobot jaringan menggunakan algoritma optimasi seperti Adam.
+
+2. **Preprocessing Data**
+   - Input berupa gambar wajah yang dipotong (cropping) dan diubah ukurannya ke dimensi konstan (320x320 piksel) sesuai dengan requisites model. Normalisasi piksel dilakukan untuk mempercepat konvergensi.
+   - Deteksi wajah real-time memakai **MediaPipe Face Detection**, memisahkan region of interest (ROI) dari latar belakang.
+
+3. **Ekspor dan Inferensi Model**
+   - Setelah pelatihan offline (biasanya di lingkungan Python dengan PyTorch atau TensorFlow), model diekspor ke ONNX. ONNX Runtime Web memungkinkan eksekusi model di WebAssembly atau WebGPU di browser untuk inferensi cepat dan privasi data pengguna.
+   - Inferensi server-side juga didukung dengan ONNX Runtime Node untuk batch processing atau auditing.
+
+4. **Dataset dan Pelatihan Model**
+   - Data dikumpulkan dari berbagai sumber terbuka dan studi dermatologi dengan anotasi kondisi kulit (jerawat, komedo, flek hitam, kulit berminyak, kulit normal, kerutan) oleh panel ahli. Data juga mencakup variasi etnisitas, usia, dan kondisi pencahayaan untuk menjamin generalisasi.
+   - Teknik augmentasi citra (rotasi, flipping, perubahan kecerahan/kontras) diterapkan untuk memperbanyak sampel dan mengurangi bias.
+   - Pelatihan dilakukan di lingkungan Python (PyTorch/TensorFlow) menggunakan GPU; hyperparameter dioptimalkan melalui grid search. Model akhir disimpan sebagai file ONNX.
+
+5. **Evaluasi dan Validasi**
+   - Model dinilai secara kuantitatif menggunakan set pengujian terpisah. Validasi silang k-fold digunakan untuk mengurangi overfitting.
+   - Hasil eksperimen dicatat untuk mendukung klaim ilmiah dan dapat diperluas oleh peneliti lain.
 
 ### Tujuan Utama
 
-- **Diagnosis Awal**: Memberikan analisis cepat tentang kondisi kulit pengguna
-- **Rekomendasi Produk**: Menyarankan produk perawatan kulit berdasarkan hasil diagnosa
-- **Edukasi**: Menyediakan artikel dan informasi edukatif tentang kesehatan kulit
-- **Personalisasi**: Mempersonalisasi pengalaman pengguna berdasarkan riwayat prediksi
+- **Diagnosis Awal**: Memberikan analisis cepat tentang keadaan kulit pengguna berdasarkan hasil prediksi klasifikasi model.
+- **Rekomendasi Produk**: Menyuguhkan rekomendasi produk perawatan kulit yang disesuaikan berdasarkan kondisi kulit yang terdeteksi dan data rating dari komunitas.
+- **Edukasi**: Menyajikan artikel ilmiah dan edukatif mengenai dermatologi serta perawatan kulit.
+- **Personalisasi**: Mempersonalisasi pengalaman pengguna berdasar riwayat prediksi dan interaksi, memanfaatkan teknik _user profiling_ dan _data analytics_.
 
 ### Target User
 
-- Pengguna yang ingin mengetahui kondisi kulit mereka
-- Beauty enthusiast yang mencari rekomendasi produk
-- Individu yang ingin melacak perubahan kondisi kulit dari waktu ke waktu
+- Pengguna umum yang ingin memantau kondisi kulit mereka melalui teknologi berbasis data.
+- Beauty enthusiast dan profesional skincare yang mencari rekomendasi berbasis bukti.
+- Peneliti dan pengembang yang membutuhkan platform referensial untuk studi lanjutan di bidang kecerdasan buatan dan visi komputer.
+- Praktisi medis atau dermatolog yang ingin mempelajari aplikasi AI dalam diagnostik awal.
 
 ---
 
