@@ -49,8 +49,8 @@ type OrtNamespace = {
 }
 
 const MODEL_URL = "/model/best_skin_model.onnx"
-// Match TF2ONNX export input signature: (None, 320, 320, 3)
-const INPUT_SIZE = 320
+// Match TF2ONNX export input signature: (None, 512, 512, 3)
+const INPUT_SIZE = 512
 // Capture preview at higher resolution than model input (cap to avoid huge data URLs)
 const CAPTURE_MAX_SIZE = 1024
 const CAPTURE_MIME: 'image/jpeg' | 'image/png' = 'image/jpeg'
