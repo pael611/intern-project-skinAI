@@ -58,7 +58,7 @@ const CAPTURE_JPEG_QUALITY = 0.95
 const categories = [
   "Acne",
   "Blackheads",
-  "light Spots",
+  "Dark Spots",
   "Normal Skin",
   "Oily Skin",
   "Wrinkles",
