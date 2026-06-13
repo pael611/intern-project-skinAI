@@ -859,13 +859,21 @@ export default function PredictPage() {
       sy = (vh - sh) / 2
     }
 
-    const captureSize = Math.min(Math.max(1, Math.floor(Math.min(sw, sh))), CAPTURE_MAX_SIZE)
+    // Capture dengan ukuran optimal untuk model (512x512)
+    // Augmentasi akan diterapkan di preprocessImage() saat runPredict()
+    const captureSize = INPUT_SIZE
     canvasRef.current.width = captureSize
     canvasRef.current.height = captureSize
     const ctx = canvasRef.current.getContext("2d")!
     ctx.imageSmoothingEnabled = true
     ;(ctx as unknown as { imageSmoothingQuality?: 'low' | 'medium' | 'high' }).imageSmoothingQuality = "high"
+    
+    // Clear dan draw dengan center-crop preserve aspect ratio
     ctx.clearRect(0, 0, captureSize, captureSize)
+    ctx.fillStyle = "rgba(0, 0, 0, 0)"
+    ctx.fillRect(0, 0, captureSize, captureSize)
+    
+    // Draw video frame dengan transformasi center-crop
     ctx.drawImage(videoRef.current, sx, sy, sw, sh, 0, 0, captureSize, captureSize)
 
     const dataUrl =
