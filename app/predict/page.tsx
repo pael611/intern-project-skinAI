@@ -54,7 +54,7 @@ const INPUT_SIZE = 512
 // Capture preview at higher resolution than model input (cap to avoid huge data URLs)
 const CAPTURE_MAX_SIZE = 1024
 const CAPTURE_MIME: 'image/jpeg' | 'image/png' = 'image/jpeg'
-const CAPTURE_JPEG_QUALITY = 0.95
+const CAPTURE_JPEG_QUALITY = 1.0
 const categories = [
   "Acne",
   "Blackheads",
@@ -257,16 +257,54 @@ export default function PredictPage() {
     reader.readAsDataURL(file)
   }
 
+  // Helper: Apply random horizontal flip
+  function applyRandomFlip(ctx: CanvasRenderingContext2D, size: number) {
+    if (Math.random() > 0.5) {
+      ctx.scale(-1, 1)
+      ctx.translate(-size, 0)
+    }
+  }
+
+  // Helper: Apply random rotation with reflect fill mode
+  function applyRandomRotation(ctx: CanvasRenderingContext2D, size: number) {
+    const maxAngle = 0.03 // radians (approximately 1.7 degrees)
+    const angle = (Math.random() * 2 - 1) * maxAngle
+    ctx.translate(size / 2, size / 2)
+    ctx.rotate(angle)
+    ctx.translate(-size / 2, -size / 2)
+  }
+
+  // Helper: Apply random translation with reflect fill mode
+  function applyRandomTranslation(ctx: CanvasRenderingContext2D, size: number) {
+    const maxTranslateX = size * 0.03
+    const maxTranslateY = size * 0.03
+    const tx = (Math.random() * 2 - 1) * maxTranslateX
+    const ty = (Math.random() * 2 - 1) * maxTranslateY
+    ctx.translate(tx, ty)
+  }
+
+  // Helper: Apply random zoom with reflect fill mode
+  function applyRandomZoom(ctx: CanvasRenderingContext2D, size: number) {
+    const maxZoom = 0.05 // ±5% zoom
+    const zoomFactor = 1 + (Math.random() * 2 - 1) * maxZoom
+    ctx.translate(size / 2, size / 2)
+    ctx.scale(zoomFactor, zoomFactor)
+    ctx.translate(-size / 2, -size / 2)
+  }
+
   function preprocessImage(img: HTMLImageElement, size = INPUT_SIZE) {
     const ort = ortRef.current
     if (!ort) {
       throw new Error("ONNX runtime not loaded")
     }
 
+    // Step 1: Create canvas and draw center-cropped image
     const canvas = document.createElement("canvas")
     canvas.width = size
     canvas.height = size
     const ctx = canvas.getContext("2d")!
+    ctx.imageSmoothingEnabled = true
+    ;(ctx as unknown as { imageSmoothingQuality?: 'low' | 'medium' | 'high' }).imageSmoothingQuality = "high"
 
     // Center-crop preserve aspect ratio
     const sw = img.naturalWidth || img.width
@@ -286,10 +324,33 @@ export default function PredictPage() {
     }
     ctx.drawImage(img, sx, sy, sWidth, sHeight, 0, 0, size, size)
 
-    const imageData = ctx.getImageData(0, 0, size, size)
+    // Step 2: Apply augmentations on a new canvas to handle transformations properly
+    const augCanvas = document.createElement("canvas")
+    augCanvas.width = size
+    augCanvas.height = size
+    const augCtx = augCanvas.getContext("2d")!
+    augCtx.imageSmoothingEnabled = true
+    ;(augCtx as unknown as { imageSmoothingQuality?: 'low' | 'medium' | 'high' }).imageSmoothingQuality = "high"
+    
+    // Set fillStyle for reflect mode (won't be used but good practice)
+    augCtx.fillStyle = "rgba(0, 0, 0, 0)"
+    
+    // Apply transformations in order
+    augCtx.save()
+    applyRandomFlip(augCtx, size)
+    applyRandomRotation(augCtx, size)
+    applyRandomTranslation(augCtx, size)
+    applyRandomZoom(augCtx, size)
+    
+    // Draw the preprocessed image with transformations
+    augCtx.drawImage(canvas, 0, 0, size, size, 0, 0, size, size)
+    augCtx.restore()
+
+    // Step 3: Extract image data and normalize
+    const imageData = augCtx.getImageData(0, 0, size, size)
     const { data } = imageData
     const arr = new Float32Array(size * size * 3)
-    // Normalize to [-1, 1] (MobileNetV2-style) or adjust per your model
+    // Normalize to [-1, 1] (MobileNetV2-style)
     for (let i = 0; i < size * size; i++) {
       arr[i * 3 + 0] = data[i * 4 + 0] / 127.5 - 1
       arr[i * 3 + 1] = data[i * 4 + 1] / 127.5 - 1
