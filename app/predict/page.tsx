@@ -903,7 +903,7 @@ export default function PredictPage() {
     canvasRef.current.width = vw
     canvasRef.current.height = vh
     const ctx = canvasRef.current.getContext("2d")!
-    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingEnabled = false
     ;(ctx as unknown as { imageSmoothingQuality?: 'low' | 'medium' | 'high' }).imageSmoothingQuality = "high"
     
     // Draw video frame langsung tanpa crop atau transformasi
