@@ -66,6 +66,46 @@ const categories = [
 
 const FACE_NOT_DETECTED_SHORT = "Wajah tidak terdeteksi sempurna. Tetap tenang, prediksi masih bisa dilakukan."
 
+// Helper: Get dimensions dari berbagai source types (Image, ImageBitmap, Canvas)
+function getSourceDimensions(source: any): { width: number; height: number } {
+  const width = source.width || source.naturalWidth || 0
+  const height = source.height || source.naturalHeight || 0
+  return { width, height }
+}
+
+// Helper: Find max value index in array
+function argMax(scores: Float32Array, start = 0, end = scores.length): number {
+  let bestIndex = start
+  for (let index = start + 1; index < end; index++) {
+    if (scores[index] > scores[bestIndex]) bestIndex = index
+  }
+  return bestIndex
+}
+
+// Helper: Extract prediction from scores array
+function predictionFromScores(scores: Float32Array, classNames: string[], offset = 0): { classIndex: number; label: string; confidence: number } {
+  const classIndex = argMax(scores, offset, offset + classNames.length)
+  const confidence = scores[classIndex]
+  return {
+    classIndex: classIndex - offset,
+    label: classNames[classIndex - offset] || `class_${classIndex - offset}`,
+    confidence,
+  }
+}
+
+// Helper: Detect input size dari model metadata
+function detectInputSizeFromMetadata(session: OrtSession): number {
+  const inputName = session.inputNames?.[0] ?? Object.keys(session.inputMetadata || {})[0]
+  const meta = session.inputMetadata?.[inputName] as any
+  const dims = Array.isArray(meta?.dimensions) ? meta.dimensions : Array.isArray(meta?.dims) ? meta.dims : []
+  const numericDims = dims.filter((value: any) => typeof value === 'number' && Number.isFinite(value))
+  if (numericDims.length >= 4) {
+    if (numericDims[1] === numericDims[2]) return numericDims[1]
+    if (numericDims[2] === numericDims[3]) return numericDims[2]
+  }
+  return INPUT_SIZE
+}
+
 export default function PredictPage() {
   const [sessionReady, setSessionReady] = useState(false)
   const [loadingMsg, setLoadingMsg] = useState<string>("Loading ONNX model…")
@@ -79,6 +119,7 @@ export default function PredictPage() {
   const [cameraActive, setCameraActive] = useState(false)
   const [previewSrc, setPreviewSrc] = useState<string | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [detectedInputSize, setDetectedInputSize] = useState<number>(INPUT_SIZE)
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -198,7 +239,9 @@ export default function PredictPage() {
         // Create session
         sessionRef.current = await ortRef.current.InferenceSession.create(MODEL_URL)
         // Optional: warm up kernels with a dummy input
-        const dummy = new ortRef.current.Tensor("float32", new Float32Array(INPUT_SIZE * INPUT_SIZE * 3), [1, INPUT_SIZE, INPUT_SIZE, 3])
+        const detectedSize = detectInputSizeFromMetadata(sessionRef.current)
+        setDetectedInputSize(detectedSize)
+        const dummy = new ortRef.current.Tensor("float32", new Float32Array(detectedSize * detectedSize * 3), [1, detectedSize, detectedSize, 3])
         const inputName = sessionRef.current.inputNames?.[0] ?? Object.keys(sessionRef.current.inputMetadata)[0]
         try { await sessionRef.current.run({ [inputName]: dummy }) } catch {}
         setSessionReady(true)
@@ -257,107 +300,98 @@ export default function PredictPage() {
     reader.readAsDataURL(file)
   }
 
-  // Helper: Apply random horizontal flip
-  function applyRandomFlip(ctx: CanvasRenderingContext2D, size: number) {
-    if (Math.random() > 0.5) {
-      ctx.scale(-1, 1)
-      ctx.translate(-size, 0)
-    }
-  }
-
-  // Helper: Apply random rotation with reflect fill mode
-  function applyRandomRotation(ctx: CanvasRenderingContext2D, size: number) {
-    const maxAngle = 0.03 // radians (approximately 1.7 degrees)
-    const angle = (Math.random() * 2 - 1) * maxAngle
-    ctx.translate(size / 2, size / 2)
-    ctx.rotate(angle)
-    ctx.translate(-size / 2, -size / 2)
-  }
-
-  // Helper: Apply random translation with reflect fill mode
-  function applyRandomTranslation(ctx: CanvasRenderingContext2D, size: number) {
-    const maxTranslateX = size * 0.03
-    const maxTranslateY = size * 0.03
-    const tx = (Math.random() * 2 - 1) * maxTranslateX
-    const ty = (Math.random() * 2 - 1) * maxTranslateY
-    ctx.translate(tx, ty)
-  }
-
-  // Helper: Apply random zoom with reflect fill mode
-  function applyRandomZoom(ctx: CanvasRenderingContext2D, size: number) {
-    const maxZoom = 0.05 // ±5% zoom
-    const zoomFactor = 1 + (Math.random() * 2 - 1) * maxZoom
-    ctx.translate(size / 2, size / 2)
-    ctx.scale(zoomFactor, zoomFactor)
-    ctx.translate(-size / 2, -size / 2)
-  }
-
-  function preprocessImage(img: HTMLImageElement, size = INPUT_SIZE) {
+  // Helper: Convert source image to tensor dengan center-crop (tanpa augmentasi random)
+  // Menggunakan metode dari script evaluation yang terbukti lebih baik untuk model
+  function sourceToTensor(source: any, size = INPUT_SIZE): OrtTensor {
     const ort = ortRef.current
     if (!ort) {
       throw new Error("ONNX runtime not loaded")
     }
 
-    // Step 1: Create canvas and draw center-cropped image
     const canvas = document.createElement("canvas")
     canvas.width = size
     canvas.height = size
-    const ctx = canvas.getContext("2d")!
+    const ctx = canvas.getContext("2d", { willReadFrequently: true })
+    if (!ctx) throw new Error("Canvas context tidak tersedia")
+
     ctx.imageSmoothingEnabled = true
     ;(ctx as unknown as { imageSmoothingQuality?: 'low' | 'medium' | 'high' }).imageSmoothingQuality = "high"
 
-    // Center-crop preserve aspect ratio
-    const sw = img.naturalWidth || img.width
-    const sh = img.naturalHeight || img.height
-    const arSrc = sw / sh
-    const arDst = 1
+    // Center-crop dengan preserve aspect ratio
+    const { width: sw, height: sh } = getSourceDimensions(source)
+    if (!sw || !sh) throw new Error("Dimensi gambar tidak valid")
+
+    const srcAspect = sw / sh
+    const dstAspect = 1
     let sx = 0,
       sy = 0,
       sWidth = sw,
       sHeight = sh
-    if (arSrc > arDst) {
-      sWidth = sh * arDst
+
+    if (srcAspect > dstAspect) {
+      sWidth = sh * dstAspect
       sx = (sw - sWidth) / 2
     } else {
-      sHeight = sw / arDst
+      sHeight = sw / dstAspect
       sy = (sh - sHeight) / 2
     }
-    ctx.drawImage(img, sx, sy, sWidth, sHeight, 0, 0, size, size)
 
-    // Step 2: Apply augmentations on a new canvas to handle transformations properly
-    const augCanvas = document.createElement("canvas")
-    augCanvas.width = size
-    augCanvas.height = size
-    const augCtx = augCanvas.getContext("2d")!
-    augCtx.imageSmoothingEnabled = true
-    ;(augCtx as unknown as { imageSmoothingQuality?: 'low' | 'medium' | 'high' }).imageSmoothingQuality = "high"
-    
-    // Set fillStyle for reflect mode (won't be used but good practice)
-    augCtx.fillStyle = "rgba(0, 0, 0, 0)"
-    
-    // Apply transformations in order
-    augCtx.save()
-    applyRandomFlip(augCtx, size)
-    applyRandomRotation(augCtx, size)
-    applyRandomTranslation(augCtx, size)
-    applyRandomZoom(augCtx, size)
-    
-    // Draw the preprocessed image with transformations
-    augCtx.drawImage(canvas, 0, 0, size, size, 0, 0, size, size)
-    augCtx.restore()
+    ctx.clearRect(0, 0, size, size)
+    ctx.drawImage(source, sx, sy, sWidth, sHeight, 0, 0, size, size)
 
-    // Step 3: Extract image data and normalize
-    const imageData = augCtx.getImageData(0, 0, size, size)
+    // Extract image data dan normalize ke [-1, 1]
+    const imageData = ctx.getImageData(0, 0, size, size)
     const { data } = imageData
     const arr = new Float32Array(size * size * 3)
-    // Normalize to [-1, 1] (MobileNetV2-style)
+    
     for (let i = 0; i < size * size; i++) {
-      arr[i * 3 + 0] = data[i * 4 + 0] / 127.5 - 1
-      arr[i * 3 + 1] = data[i * 4 + 1] / 127.5 - 1
-      arr[i * 3 + 2] = data[i * 4 + 2] / 127.5 - 1
+      arr[i * 3] = data[i * 4] / 127.5 - 1       // R
+      arr[i * 3 + 1] = data[i * 4 + 1] / 127.5 - 1  // G
+      arr[i * 3 + 2] = data[i * 4 + 2] / 127.5 - 1  // B
     }
+
     // Return NHWC tensor [1, size, size, 3]
     return new ort.Tensor("float32", arr, [1, size, size, 3])
+  }
+
+  // Helper: Decode batch output dari tensor
+  function decodeBatchOutput(outputTensor: any, batchSize: number): Array<{ classIndex: number; label: string; confidence: number }> {
+    const scores = outputTensor.data as Float32Array
+    const classCount = categories.length
+    const results = []
+
+    // Single image atau single output
+    if (batchSize === 1 || scores.length === classCount) {
+      const pred = predictionFromScores(scores, categories, 0)
+      results.push(pred)
+      return results
+    }
+
+    // Multiple images: scores.length === batchSize * classCount
+    if (scores.length === batchSize * classCount) {
+      for (let index = 0; index < batchSize; index++) {
+        const offset = index * classCount
+        const pred = predictionFromScores(scores, categories, offset)
+        results.push(pred)
+      }
+      return results
+    }
+
+    // Check tensor dims jika tersedia
+    if (outputTensor.dims && outputTensor.dims.length >= 2) {
+      const outputBatch = outputTensor.dims[0] || batchSize
+      if (scores.length === outputBatch * classCount) {
+        for (let index = 0; index < outputBatch; index++) {
+          const offset = index * classCount
+          results.push(predictionFromScores(scores, categories, offset))
+        }
+        return results
+      }
+    }
+
+    throw new Error(
+      `Shape output tidak sesuai. Panjang data: ${scores.length}, batch: ${batchSize}, kelas: ${classCount}`
+    )
   }
 
   async function runPredict() {
@@ -372,36 +406,55 @@ export default function PredictPage() {
     }
     
     setIsAnalyzing(true)
+    setResult('<div class="flex items-center gap-2 text-emerald-600"><div class="h-4 w-4 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent"></div><span>Menganalisis kondisi kulit...</span></div>')
+    
     const img = new window.Image()
     img.crossOrigin = "anonymous"
     img.onload = async () => {
-      imageTensorRef.current = preprocessImage(img)
       try {
-        const feeds: Record<string, unknown> = {}
-        const inputName = session.inputNames?.[0] ?? Object.keys(session.inputMetadata)[0]
-        feeds[inputName] = imageTensorRef.current
-        setResult('<div class="flex items-center gap-2 text-emerald-600"><div class="h-4 w-4 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent"></div><span>Menganalisis kondisi kulit...</span></div>')
+        // Preprocess image dengan center-crop (tanpa augmentasi random)
+        imageTensorRef.current = sourceToTensor(img, detectedInputSize)
         
+        // Get input/output names
+        const inputName = session.inputNames?.[0] ?? Object.keys(session.inputMetadata)[0]
+        const feeds: Record<string, unknown> = { [inputName]: imageTensorRef.current }
+        
+        // Run inference
         const output = await session.run(feeds)
-        const outName = session.outputNames?.[0] ?? Object.keys(output)[0]
-        const scores: Float32Array = output[outName].data
-        let bestIdx = 0
-        for (let i = 1; i < scores.length; i++) if (scores[i] > scores[bestIdx]) bestIdx = i
-        const bestScore = scores[bestIdx]
-        const label = categories[bestIdx] ?? `class_${bestIdx}`
-
-        setPredictedTag(label)
-        setPredictionConfidence(bestScore)
+        const outputName = session.outputNames?.[0] ?? Object.keys(output)[0]
+        const outputData = output[outputName]
+        
+        if (!outputData || !outputData.data) {
+          throw new Error("Output tensor tidak valid")
+        }
+        
+        // Extract prediction menggunakan decodeBatchOutput yang lebih robust
+        const predictions = decodeBatchOutput(outputData, 1)
+        const prediction = predictions[0]
+        
+        setPredictedTag(prediction.label)
+        setPredictionConfidence(prediction.confidence)
         setResult('')
-        setIsAnalyzing(false)
-
-        // Save to history (anonymous or with user if signed-in)
-        void (await savePrediction({ label, confidence: Number((bestScore).toFixed(6)), source: camStreamRef.current ? "camera" : "upload", occurred_at: new Date().toISOString() }))
+        
+        // Save to history
+        void (await savePrediction({ 
+          label: prediction.label, 
+          confidence: Number((prediction.confidence).toFixed(6)), 
+          source: camStreamRef.current ? "camera" : "upload", 
+          occurred_at: new Date().toISOString() 
+        }))
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : String(e)
         setResult(`<div class="text-red-600">Inference failed: ${message}</div>`)
+        console.error("Prediction error:", e)
+      } finally {
         setIsAnalyzing(false)
       }
+    }
+    img.onerror = () => {
+      const message = `Failed to load image: ${previewSrc}`
+      setResult(`<div class="text-red-600">${message}</div>`)
+      setIsAnalyzing(false)
     }
     img.src = previewSrc
   }
@@ -846,35 +899,15 @@ export default function PredictPage() {
       return
     }
 
-    const ar = vw / vh
-    let sx = 0,
-      sy = 0,
-      sw = vw,
-      sh = vh
-    if (ar > 1) {
-      sw = vh
-      sx = (vw - sw) / 2
-    } else {
-      sh = vw
-      sy = (vh - sh) / 2
-    }
-
-    // Capture dengan ukuran optimal untuk model (512x512)
-    // Augmentasi akan diterapkan di preprocessImage() saat runPredict()
-    const captureSize = INPUT_SIZE
-    canvasRef.current.width = captureSize
-    canvasRef.current.height = captureSize
+    // Capture gambar asli dari kamera tanpa modifikasi atau crop
+    canvasRef.current.width = vw
+    canvasRef.current.height = vh
     const ctx = canvasRef.current.getContext("2d")!
     ctx.imageSmoothingEnabled = true
     ;(ctx as unknown as { imageSmoothingQuality?: 'low' | 'medium' | 'high' }).imageSmoothingQuality = "high"
     
-    // Clear dan draw dengan center-crop preserve aspect ratio
-    ctx.clearRect(0, 0, captureSize, captureSize)
-    ctx.fillStyle = "rgba(0, 0, 0, 0)"
-    ctx.fillRect(0, 0, captureSize, captureSize)
-    
-    // Draw video frame dengan transformasi center-crop
-    ctx.drawImage(videoRef.current, sx, sy, sw, sh, 0, 0, captureSize, captureSize)
+    // Draw video frame langsung tanpa crop atau transformasi
+    ctx.drawImage(videoRef.current, 0, 0, vw, vh)
 
     const dataUrl =
       CAPTURE_MIME === 'image/jpeg'
